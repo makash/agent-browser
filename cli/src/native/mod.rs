@@ -27,6 +27,8 @@ pub mod recording;
 #[allow(dead_code)]
 pub mod screenshot;
 #[allow(dead_code)]
+pub mod security;
+#[allow(dead_code)]
 pub mod snapshot;
 #[allow(dead_code)]
 pub mod state;

@@ -2370,6 +2370,13 @@ Network:  agent-browser network <action>
   unroute [url]
   requests [--clear] [--filter <pattern>]
 
+Native Security:  agent-browser --native <command>
+  init-script add --js <script>
+  init-script list|remove <id>|clear
+  stealth enable|disable
+  ssrf-protect enable|disable
+  wait challenge cloudflare [--timeout <ms>]
+
 Storage:
   cookies [get|set|clear]    Manage cookies (set supports --url, --domain, --path, --httpOnly, --secure, --sameSite, --expires)
   storage <local|session>    Manage web storage

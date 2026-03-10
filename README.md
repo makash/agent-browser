@@ -232,6 +232,27 @@ agent-browser network requests                 # View tracked requests
 agent-browser network requests --filter api    # Filter requests
 ```
 
+### Security Presets (Native Mode)
+
+These commands currently target the native Rust backend. Use `--native` or set `AGENT_BROWSER_NATIVE=1`.
+
+```bash
+agent-browser --native init-script add --js "window.__test=true"
+agent-browser --native init-script list
+agent-browser --native init-script remove <id>
+agent-browser --native init-script clear
+
+agent-browser --native stealth enable          # Install built-in anti-fingerprinting preset
+agent-browser --native stealth disable
+
+agent-browser --native ssrf-protect enable     # Block private/special-use network destinations
+agent-browser --native ssrf-protect disable
+
+agent-browser --native wait challenge cloudflare --timeout 15000
+```
+
+The built-in `stealth` preset installs pre-navigation patches before page JavaScript runs. The built-in `ssrf-protect` preset validates navigation and sub-resource requests before dispatch and blocks loopback, RFC1918, link-local, unique-local, and other special-use destinations.
+
 ### Tabs & Windows
 
 ```bash

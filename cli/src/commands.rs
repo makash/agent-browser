@@ -355,9 +355,45 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
             })?;
             Ok(json!({ "id": id, "action": "scrollintoview", "selector": sel }))
         }
+        "init-script" => parse_init_script(&rest, &id),
+        "stealth" => parse_stealth(&rest, &id),
+        "ssrf-protect" => parse_ssrf_protect(&rest, &id),
 
         // === Wait ===
         "wait" => {
+            if rest.first().copied() == Some("challenge") {
+                let provider =
+                    rest.get(1)
+                        .copied()
+                        .ok_or_else(|| ParseError::MissingArguments {
+                            context: "wait challenge".to_string(),
+                            usage: "wait challenge <provider> [--timeout <ms>]",
+                        })?;
+                if provider != "cloudflare" {
+                    return Err(ParseError::InvalidValue {
+                        message: format!("Unsupported challenge provider: {}", provider),
+                        usage: "wait challenge cloudflare [--timeout <ms>]",
+                    });
+                }
+
+                let mut cmd = json!({ "id": id, "action": "wait_challenge_cloudflare" });
+                if let Some(idx) = rest.iter().position(|&s| s == "--timeout") {
+                    let timeout = rest
+                        .get(idx + 1)
+                        .ok_or_else(|| ParseError::MissingArguments {
+                            context: "wait challenge cloudflare --timeout".to_string(),
+                            usage: "wait challenge cloudflare [--timeout <ms>]",
+                        })?
+                        .parse::<u64>()
+                        .map_err(|_| ParseError::InvalidValue {
+                            message: "Timeout must be a positive integer".to_string(),
+                            usage: "wait challenge cloudflare [--timeout <ms>]",
+                        })?;
+                    cmd["timeout"] = json!(timeout);
+                }
+                return Ok(cmd);
+            }
+
             // Check for --url flag: wait --url "**/dashboard"
             if let Some(idx) = rest.iter().position(|&s| s == "--url" || s == "-u") {
                 let url = rest
@@ -2032,6 +2068,87 @@ fn parse_network(rest: &[&str], id: &str) -> Result<Value, ParseError> {
     }
 }
 
+fn parse_init_script(rest: &[&str], id: &str) -> Result<Value, ParseError> {
+    const VALID: &[&str] = &["add", "list", "remove", "clear"];
+
+    match rest.first().copied() {
+        Some("add") => {
+            let script = if let Some(idx) = rest.iter().position(|&s| s == "--js") {
+                rest.get(idx + 1)
+                    .copied()
+                    .ok_or_else(|| ParseError::MissingArguments {
+                        context: "init-script add --js".to_string(),
+                        usage: "init-script add --js <script>",
+                    })?
+            } else {
+                rest.get(1)
+                    .copied()
+                    .ok_or_else(|| ParseError::MissingArguments {
+                        context: "init-script add".to_string(),
+                        usage: "init-script add --js <script>",
+                    })?
+            };
+            Ok(json!({ "id": id, "action": "addinitscript", "script": script }))
+        }
+        Some("list") => Ok(json!({ "id": id, "action": "init_script_list" })),
+        Some("remove") => {
+            let script_id = rest
+                .get(1)
+                .copied()
+                .ok_or_else(|| ParseError::MissingArguments {
+                    context: "init-script remove".to_string(),
+                    usage: "init-script remove <id>",
+                })?;
+            Ok(json!({ "id": id, "action": "init_script_remove", "scriptId": script_id }))
+        }
+        Some("clear") => Ok(json!({ "id": id, "action": "init_script_clear" })),
+        Some(sub) => Err(ParseError::UnknownSubcommand {
+            subcommand: sub.to_string(),
+            valid_options: VALID,
+        }),
+        None => Err(ParseError::MissingArguments {
+            context: "init-script".to_string(),
+            usage: "init-script <add|list|remove|clear> [...]",
+        }),
+    }
+}
+
+fn parse_stealth(rest: &[&str], id: &str) -> Result<Value, ParseError> {
+    const VALID: &[&str] = &["enable", "disable"];
+
+    match rest.first().copied() {
+        Some("enable") => Ok(json!({ "id": id, "action": "stealth_enable", "preset": "default" })),
+        Some("disable") => Ok(json!({ "id": id, "action": "stealth_disable" })),
+        Some(sub) => Err(ParseError::UnknownSubcommand {
+            subcommand: sub.to_string(),
+            valid_options: VALID,
+        }),
+        None => Err(ParseError::MissingArguments {
+            context: "stealth".to_string(),
+            usage: "stealth <enable|disable>",
+        }),
+    }
+}
+
+fn parse_ssrf_protect(rest: &[&str], id: &str) -> Result<Value, ParseError> {
+    const VALID: &[&str] = &["enable", "disable"];
+
+    match rest.first().copied() {
+        Some("enable") => {
+            Ok(json!({ "id": id, "action": "ssrf_protect_enable", "preset": "strict" }))
+        }
+        Some("disable") => Ok(json!({ "id": id, "action": "ssrf_protect_disable" })),
+        Some(sub) => Err(ParseError::UnknownSubcommand {
+            subcommand: sub.to_string(),
+            valid_options: VALID,
+        }),
+        None => Err(ParseError::MissingArguments {
+            context: "ssrf-protect".to_string(),
+            usage: "ssrf-protect <enable|disable>",
+        }),
+    }
+}
+
 fn parse_storage(rest: &[&str], id: &str) -> Result<Value, ParseError> {
     const VALID: &[&str] = &["local", "session"];
 
@@ -2742,10 +2859,50 @@ mod tests {
     }
 
     #[test]
+    fn test_wait_challenge_cloudflare() {
+        let cmd = parse_command(
+            &args("wait challenge cloudflare --timeout 15000"),
+            &default_flags(),
+        )
+        .unwrap();
+        assert_eq!(cmd["action"], "wait_challenge_cloudflare");
+        assert_eq!(cmd["timeout"], 15000);
+    }
+
+    #[test]
     fn test_wait_text() {
         let cmd = parse_command(&args("wait --text Welcome"), &default_flags()).unwrap();
         assert_eq!(cmd["action"], "wait");
         assert_eq!(cmd["selector"], "text=Welcome");
+    }
+
+    #[test]
+    fn test_init_script_add() {
+        let cmd = parse_command(
+            &args("init-script add --js window.__test=true"),
+            &default_flags(),
+        )
+        .unwrap();
+        assert_eq!(cmd["action"], "addinitscript");
+        assert_eq!(cmd["script"], "window.__test=true");
+    }
+
+    #[test]
+    fn test_init_script_list() {
+        let cmd = parse_command(&args("init-script list"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "init_script_list");
+    }
+
+    #[test]
+    fn test_stealth_enable() {
+        let cmd = parse_command(&args("stealth enable"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "stealth_enable");
+    }
+
+    #[test]
+    fn test_ssrf_protect_enable() {
+        let cmd = parse_command(&args("ssrf-protect enable"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "ssrf_protect_enable");
     }
 
     // === Unknown command ===

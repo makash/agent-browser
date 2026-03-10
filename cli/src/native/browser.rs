@@ -1031,6 +1031,15 @@ impl BrowserManager {
 
     pub async fn add_script_to_evaluate(&self, source: &str) -> Result<String, String> {
         let session_id = self.active_session_id()?;
+        self.add_script_to_evaluate_for_session(session_id, source)
+            .await
+    }
+
+    pub async fn add_script_to_evaluate_for_session(
+        &self,
+        session_id: &str,
+        source: &str,
+    ) -> Result<String, String> {
         let result = self
             .client
             .send_command(
@@ -1044,6 +1053,21 @@ impl BrowserManager {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string())
+    }
+
+    pub async fn remove_script_to_evaluate_for_session(
+        &self,
+        session_id: &str,
+        identifier: &str,
+    ) -> Result<(), String> {
+        self.client
+            .send_command(
+                "Page.removeScriptToEvaluateOnNewDocument",
+                Some(json!({ "identifier": identifier })),
+                Some(session_id),
+            )
+            .await?;
+        Ok(())
     }
 
     pub fn add_page(&mut self, page: PageInfo) {
