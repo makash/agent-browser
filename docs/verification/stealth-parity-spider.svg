@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="760" viewBox="0 0 900 760" role="img" aria-labelledby="title desc">
+  <title id="title">Stealth parity spider chart</title>
+  <desc id="desc">Measured six-axis spider chart comparing agent-browser normal, agent-browser stealth, Playwright normal, and Playwright stealth on the local stealth probe surface.</desc>
+  <style>
+    .bg { fill: #0b1220; }
+    .grid { fill: none; stroke: rgba(255,255,255,0.14); stroke-width: 1; }
+    .axis { stroke: rgba(255,255,255,0.2); stroke-width: 1; }
+    .label { fill: #d9e7ff; font: 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .title { fill: #ffffff; font: 700 24px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .subtitle { fill: #9cb0cf; font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .legend { fill: #d9e7ff; font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+  <rect class="bg" width="900" height="760" rx="24" />
+
+  <text x="64" y="58" class="title">Measured Stealth Probe Comparison</text>
+  <text x="64" y="86" class="subtitle">Captured on 2026-03-10 against the local pre-navigation stealth probe</text>
+
+  <g transform="translate(450,390)">
+    <polygon class="grid" points="0,-220 190,-110 190,110 0,220 -190,110 -190,-110" />
+    <polygon class="grid" points="0,-176 152,-88 152,88 0,176 -152,88 -152,-88" />
+    <polygon class="grid" points="0,-132 114,-66 114,66 0,132 -114,66 -114,-66" />
+    <polygon class="grid" points="0,-88 76,-44 76,44 0,88 -76,44 -76,-44" />
+    <polygon class="grid" points="0,-44 38,-22 38,22 0,44 -38,22 -38,-22" />
+
+    <line class="axis" x1="0" y1="0" x2="0" y2="-220" />
+    <line class="axis" x1="0" y1="0" x2="190" y2="-110" />
+    <line class="axis" x1="0" y1="0" x2="190" y2="110" />
+    <line class="axis" x1="0" y1="0" x2="0" y2="220" />
+    <line class="axis" x1="0" y1="0" x2="-190" y2="110" />
+    <line class="axis" x1="0" y1="0" x2="-190" y2="-110" />
+
+    <text class="label" x="0" y="-244" text-anchor="middle">webdriver</text>
+    <text class="label" x="233" y="-118" text-anchor="start">chrome runtime</text>
+    <text class="label" x="225" y="128" text-anchor="start">plugins</text>
+    <text class="label" x="0" y="252" text-anchor="middle">languages</text>
+    <text class="label" x="-225" y="128" text-anchor="end">webgl</text>
+    <text class="label" x="-230" y="-118" text-anchor="end">hardware profile</text>
+
+    <polygon points="0,0 190,-110 190,110 0,220 0,0 0,0" fill="rgba(255,107,107,0.18)" stroke="#ff6b6b" stroke-width="2" />
+    <polygon points="0,-220 190,-110 190,110 0,220 -190,110 -190,-110" fill="rgba(87,181,255,0.14)" stroke="#57b5ff" stroke-width="2" />
+    <polygon points="0,0 0,0 0,0 0,0 0,0 0,0" fill="rgba(255,180,92,0.14)" stroke="#ffb45c" stroke-width="2" />
+    <polygon points="0,-220 190,-110 190,110 0,220 -190,110 0,0" fill="rgba(47,191,113,0.14)" stroke="#2fbf71" stroke-width="2" />
+  </g>
+
+  <g transform="translate(64,620)">
+    <rect x="0" y="-14" width="18" height="18" fill="rgba(255,107,107,0.18)" stroke="#ff6b6b" />
+    <text class="legend" x="30" y="0">agent-browser normal</text>
+
+    <rect x="260" y="-14" width="18" height="18" fill="rgba(87,181,255,0.14)" stroke="#57b5ff" />
+    <text class="legend" x="290" y="0">agent-browser stealth</text>
+
+    <rect x="0" y="26" width="18" height="18" fill="rgba(255,180,92,0.14)" stroke="#ffb45c" />
+    <text class="legend" x="30" y="40">playwright normal</text>
+
+    <rect x="260" y="26" width="18" height="18" fill="rgba(47,191,113,0.14)" stroke="#2fbf71" />
+    <text class="legend" x="290" y="40">playwright stealth</text>
+  </g>
+
+  <text x="64" y="704" class="subtitle">Permissions are omitted because they passed in all four runs. Playwright stealth missed only the hardware profile axis.</text>
+</svg>

@@ -1,0 +1,30 @@
+{
+  "title": "Stealth parity scorecard",
+  "description": "Measured results from the local stealth probe on 2026-03-10.",
+  "measuredAt": "2026-03-10",
+  "evidenceDir": "docs/verification/evidence/2026-03-10-stealth",
+  "scale": {
+    "min": 0,
+    "max": 5
+  },
+  "axes": [
+    "webdriver",
+    "chrome runtime",
+    "plugins",
+    "languages",
+    "webgl",
+    "hardware profile"
+  ],
+  "profiles": {
+    "agent-browser normal": [0, 5, 5, 5, 0, 0],
+    "agent-browser stealth": [5, 5, 5, 5, 5, 5],
+    "playwright normal": [0, 0, 0, 0, 0, 0],
+    "playwright stealth": [5, 5, 5, 5, 5, 0]
+  },
+  "notes": [
+    "This scorecard is intentionally narrow: it covers the stealth probe surface, not every public anti-bot detector.",
+    "Permissions are omitted from the spider chart because they passed in all four runs and do not differentiate the profiles.",
+    "Measured scores: agent-browser normal 4/7, agent-browser stealth 7/7, Playwright normal 1/7, Playwright stealth 6/7.",
+    "The Playwright stealth miss came from connection.rtt staying at 50 instead of the probe's expected 100."
+  ]
+}

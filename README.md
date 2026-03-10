@@ -2,6 +2,45 @@
 
 Headless browser automation CLI for AI agents. Fast Rust CLI with Node.js fallback.
 
+## Native Security Mode
+
+The native Rust path can now do more than just basic automation. In `--native` mode, `agent-browser` supports:
+
+- pre-navigation init script injection
+- a built-in `stealth` preset for anti-fingerprinting patches
+- a built-in `ssrf-protect` preset for blocking private and special-use destinations
+- atomic Cloudflare challenge detect-and-wait
+
+That makes it viable for scanner-style workloads that want Playwright-like security and stealth properties with a smaller Rust-native runtime footprint.
+
+### Probe Before / After
+
+Measured on the local pre-navigation stealth probe in [test/e2e/fixtures/stealth-probe.html](/Users/mainstreet/code/agent-browser-stealth/agent-browser/test/e2e/fixtures/stealth-probe.html).
+
+<table>
+  <tr>
+    <td><strong>Before: agent-browser normal</strong></td>
+    <td><strong>After: agent-browser stealth</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/verification/evidence/2026-03-10-stealth/agent-browser-normal.png" alt="agent-browser normal stealth probe score 4/7" width="420"></td>
+    <td><img src="docs/verification/evidence/2026-03-10-stealth/agent-browser-stealth.png" alt="agent-browser stealth probe score 7/7" width="420"></td>
+  </tr>
+</table>
+
+### Probe Comparison Chart
+
+![Measured stealth probe comparison](docs/verification/stealth-parity-spider.svg)
+
+Measured local probe scores:
+
+- `agent-browser normal`: `4/7`
+- `agent-browser stealth`: `7/7`
+- `Playwright normal`: `1/7`
+- `Playwright stealth`: `6/7`
+
+The full workflow, screenshots, and JSON artifacts live in [docs/verification/stealth-validation.md](/Users/mainstreet/code/agent-browser-stealth/agent-browser/docs/verification/stealth-validation.md).
+
 ## Installation
 
 ### Global Installation (recommended)

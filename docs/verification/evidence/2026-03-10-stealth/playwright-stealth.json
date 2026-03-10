@@ -1,0 +1,60 @@
+{
+  "url": "http://127.0.0.1:4311/stealth-probe.html",
+  "generatedAt": "2026-03-10T17:32:26.172Z",
+  "early": {
+    "webdriver": "undefined",
+    "hasChrome": true,
+    "pluginsLength": 3,
+    "pluginNames": [
+      "Chrome PDF Plugin",
+      "Chrome PDF Viewer",
+      "Native Client"
+    ],
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "language": "en-US",
+    "webglVendor": "Intel Inc.",
+    "webglRenderer": "Intel Iris OpenGL Engine",
+    "hardwareConcurrency": 8,
+    "deviceMemory": 8,
+    "platform": "Win32",
+    "connectionRtt": 50
+  },
+  "final": {
+    "webdriver": "undefined",
+    "hasChrome": true,
+    "pluginsLength": 3,
+    "pluginNames": [
+      "Chrome PDF Plugin",
+      "Chrome PDF Viewer",
+      "Native Client"
+    ],
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "language": "en-US",
+    "webglVendor": "Intel Inc.",
+    "webglRenderer": "Intel Iris OpenGL Engine",
+    "hardwareConcurrency": 8,
+    "deviceMemory": 8,
+    "platform": "Win32",
+    "connectionRtt": 50,
+    "permissions": {
+      "status": "denied"
+    }
+  },
+  "checks": {
+    "webdriverMasked": true,
+    "chromePresent": true,
+    "pluginsPresent": true,
+    "languagesPatched": true,
+    "webglPatched": true,
+    "permissionsPatched": true,
+    "hardwarePatched": false
+  },
+  "score": 6,
+  "maxScore": 7
+}
