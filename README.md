@@ -1,6 +1,19 @@
 # agent-browser
 
-Headless browser automation CLI for AI agents. Fast Rust CLI with Node.js fallback.
+This repository is a security-scanner-focused fork of `agent-browser`.
+
+It exists to make the Rust-native browser backend viable for security scanning workloads that need stronger stealth and network safety guarantees than upstream currently exposes.
+
+Specifically, this fork is being developed so scanners can use `agent-browser` with Playwright-style:
+
+- pre-navigation script injection
+- built-in stealth hardening
+- strict SSRF protection for navigation and sub-resources
+- Cloudflare challenge wait handling
+
+If you are looking for the general-purpose upstream project, see `vercel-labs/agent-browser`. If you are building or running a scanner and want the Rust-native path with stealth and SSRF protections, this fork is the relevant codebase.
+
+> **Fork status:** purpose-built for security scanners first, upstreamability second.
 
 ## Native Security Mode
 
@@ -11,11 +24,11 @@ The native Rust path can now do more than just basic automation. In `--native` m
 - a built-in `ssrf-protect` preset for blocking private and special-use destinations
 - atomic Cloudflare challenge detect-and-wait
 
-That makes it viable for scanner-style workloads that want Playwright-like security and stealth properties with a smaller Rust-native runtime footprint.
+That is the whole point of this fork: make `agent-browser` practical inside security scanners where lower memory usage and lower token usage are only useful if the browser still behaves safely and stealthily.
 
 ### Probe Before / After
 
-Measured on the local pre-navigation stealth probe in [test/e2e/fixtures/stealth-probe.html](/Users/mainstreet/code/agent-browser-stealth/agent-browser/test/e2e/fixtures/stealth-probe.html).
+Measured on the local pre-navigation stealth probe in [test/e2e/fixtures/stealth-probe.html](test/e2e/fixtures/stealth-probe.html).
 
 <table>
   <tr>
@@ -45,7 +58,7 @@ Measured on the local pre-navigation stealth probe:
 
 The only miss in the measured `Playwright stealth` run was the hardware profile row: `connection.rtt` stayed at `50`, while the probe expected `100`.
 
-The full workflow, screenshots, and JSON artifacts live in [docs/verification/stealth-validation.md](/Users/mainstreet/code/agent-browser-stealth/agent-browser/docs/verification/stealth-validation.md).
+The full workflow, screenshots, and JSON artifacts live in [docs/verification/stealth-validation.md](docs/verification/stealth-validation.md).
 
 ## Installation
 
@@ -96,7 +109,7 @@ agent-browser install  # Download Chromium
 ### From Source
 
 ```bash
-git clone https://github.com/vercel-labs/agent-browser
+git clone git@github.com:makash/agent-browser.git
 cd agent-browser
 pnpm install
 pnpm build

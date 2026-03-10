@@ -10,10 +10,10 @@ The local probe page is the primary source of truth. Public detector pages are s
 
 ## Files
 
-- Probe page: [test/e2e/fixtures/stealth-probe.html](/Users/mainstreet/code/agent-browser-stealth/agent-browser/test/e2e/fixtures/stealth-probe.html)
-- Scorecard: [docs/verification/stealth-scorecard.json](/Users/mainstreet/code/agent-browser-stealth/agent-browser/docs/verification/stealth-scorecard.json)
-- Spider chart: [docs/verification/stealth-parity-spider.svg](/Users/mainstreet/code/agent-browser-stealth/agent-browser/docs/verification/stealth-parity-spider.svg)
-- Evidence: [docs/verification/evidence/2026-03-10-stealth](/Users/mainstreet/code/agent-browser-stealth/agent-browser/docs/verification/evidence/2026-03-10-stealth)
+- Probe page: [test/e2e/fixtures/stealth-probe.html](../../test/e2e/fixtures/stealth-probe.html)
+- Scorecard: [docs/verification/stealth-scorecard.json](stealth-scorecard.json)
+- Spider chart: [docs/verification/stealth-parity-spider.svg](stealth-parity-spider.svg)
+- Evidence: [docs/verification/evidence/2026-03-10-stealth](evidence/2026-03-10-stealth)
 
 ## Measured result
 
@@ -64,7 +64,7 @@ The probe checks:
 Serve the fixture directory over HTTP so the page behaves like a normal origin:
 
 ```bash
-cd /Users/mainstreet/code/agent-browser-stealth/agent-browser
+cd /path/to/agent-browser
 python3 -m http.server 4173 --directory test/e2e/fixtures
 ```
 
@@ -99,14 +99,16 @@ Store them under a timestamped evidence directory such as `docs/verification/evi
 Use a clean session with no stealth preset:
 
 ```bash
-cd /Users/mainstreet/code/agent-browser-stealth/agent-browser
+cd /path/to/agent-browser
 BIN=./cli/target/release/agent-browser
+OUT=docs/verification/evidence/2026-03-10-stealth
+mkdir -p "$OUT"
 export AGENT_BROWSER_NATIVE=1
 
 $BIN --session ab-normal close || true
 $BIN --session ab-normal open http://127.0.0.1:4173/stealth-probe.html
-$BIN --session ab-normal screenshot evidence/2026-03-10-stealth/agent-browser-normal.png
-$BIN --session ab-normal eval "JSON.stringify(window.__stealth_probe_report)" > evidence/2026-03-10-stealth/agent-browser-normal.json
+$BIN --session ab-normal screenshot "$OUT/agent-browser-normal.png"
+$BIN --session ab-normal eval "JSON.stringify(window.__stealth_probe_report)" > "$OUT/agent-browser-normal.json"
 ```
 
 ## Run 2: agent-browser stealth
@@ -114,15 +116,17 @@ $BIN --session ab-normal eval "JSON.stringify(window.__stealth_probe_report)" > 
 Enable the built-in preset before navigation:
 
 ```bash
-cd /Users/mainstreet/code/agent-browser-stealth/agent-browser
+cd /path/to/agent-browser
 BIN=./cli/target/release/agent-browser
+OUT=docs/verification/evidence/2026-03-10-stealth
+mkdir -p "$OUT"
 export AGENT_BROWSER_NATIVE=1
 
 $BIN --session ab-stealth close || true
 $BIN --session ab-stealth stealth enable
 $BIN --session ab-stealth open http://127.0.0.1:4173/stealth-probe.html
-$BIN --session ab-stealth screenshot evidence/2026-03-10-stealth/agent-browser-stealth.png
-$BIN --session ab-stealth eval "JSON.stringify(window.__stealth_probe_report)" > evidence/2026-03-10-stealth/agent-browser-stealth.json
+$BIN --session ab-stealth screenshot "$OUT/agent-browser-stealth.png"
+$BIN --session ab-stealth eval "JSON.stringify(window.__stealth_probe_report)" > "$OUT/agent-browser-stealth.json"
 ```
 
 Optional timing sanity check:
@@ -163,7 +167,7 @@ asyncio.run(main())
 
 ## Run 4: Playwright stealth
 
-Use the same Playwright environment, but inject the stealth scripts before navigation. The current scanner entry points are in [stealth.py](/Users/mainstreet/code/spa-hacker/spa-hacker-agent/tools/stealth.py#L299) and [stealth.py](/Users/mainstreet/code/spa-hacker/spa-hacker-agent/tools/stealth.py#L313).
+Use the same Playwright environment, but inject the stealth scripts before navigation. In `spa-hacker-agent`, the relevant entry points are `tools/stealth.py` functions `apply_stealth_to_page()` and `configure_stealth()`.
 
 ```python
 import json
