@@ -28,16 +28,22 @@ Measured on the local pre-navigation stealth probe in [test/e2e/fixtures/stealth
   </tr>
 </table>
 
-### Probe Comparison Chart
+### Probe Comparison Table
 
-![Measured stealth probe comparison](docs/verification/stealth-parity-spider.svg)
+Measured on the local pre-navigation stealth probe:
 
-Measured local probe scores:
+| Stealth surface | agent-browser normal | Playwright normal | agent-browser stealth | Playwright stealth |
+| --- | --- | --- | --- | --- |
+| `navigator.webdriver` masked | FAIL | FAIL | PASS | PASS |
+| `window.chrome` present | PASS | FAIL | PASS | PASS |
+| realistic `navigator.plugins` | PASS | FAIL | PASS | PASS |
+| `languages` + `language` patched | PASS | FAIL | PASS | PASS |
+| WebGL vendor/renderer patched | FAIL | FAIL | PASS | PASS |
+| permissions query does not throw | PASS | PASS | PASS | PASS |
+| hardware profile patched | FAIL | FAIL | PASS | FAIL |
+| probe score | `4/7` | `1/7` | `7/7` | `6/7` |
 
-- `agent-browser normal`: `4/7`
-- `agent-browser stealth`: `7/7`
-- `Playwright normal`: `1/7`
-- `Playwright stealth`: `6/7`
+The only miss in the measured `Playwright stealth` run was the hardware profile row: `connection.rtt` stayed at `50`, while the probe expected `100`.
 
 The full workflow, screenshots, and JSON artifacts live in [docs/verification/stealth-validation.md](/Users/mainstreet/code/agent-browser-stealth/agent-browser/docs/verification/stealth-validation.md).
 

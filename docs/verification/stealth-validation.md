@@ -32,6 +32,19 @@ Notes:
 - `Playwright stealth` passed everything except the hardware profile check because `connection.rtt` stayed at `50` instead of the probe's expected `100`.
 - permissions passed in every run, so the spider chart focuses on the six axes that actually separated the profiles.
 
+## Measured comparison table
+
+| Stealth surface | agent-browser normal | Playwright normal | agent-browser stealth | Playwright stealth |
+| --- | --- | --- | --- | --- |
+| `navigator.webdriver` masked | FAIL | FAIL | PASS | PASS |
+| `window.chrome` present | PASS | FAIL | PASS | PASS |
+| realistic `navigator.plugins` | PASS | FAIL | PASS | PASS |
+| `languages` + `language` patched | PASS | FAIL | PASS | PASS |
+| WebGL vendor/renderer patched | FAIL | FAIL | PASS | PASS |
+| permissions query does not throw | PASS | PASS | PASS | PASS |
+| hardware profile patched | FAIL | FAIL | PASS | FAIL |
+| probe score | `4/7` | `1/7` | `7/7` | `6/7` |
+
 ## Why this probe is reliable
 
 The page captures its first fingerprint snapshot from an inline script inside `<head>`. If `stealth` or `init-script` injection is truly pre-navigation, the early snapshot already reflects the patched values.
