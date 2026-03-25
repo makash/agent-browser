@@ -207,6 +207,36 @@ pub const DEFAULT_STEALTH_PRESET: &str = r#"
       });
       HTMLCanvasElement.prototype.toBlob.toString = () => 'function toBlob() { [native code] }';
     })();
+
+    // UA/Client Hints auto-discovery from stealth proxy
+    (() => {
+      let version = '133.0.0.0';
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', 'http://127.0.0.1:8080/__stealth/profile', false);
+        xhr.timeout = 500;
+        xhr.send();
+        if (xhr.status === 200) {
+          const profile = JSON.parse(xhr.responseText);
+          if (profile.version) version = profile.version;
+        }
+      } catch (_) {}
+
+      const majorVersion = version.split('.')[0];
+      const brands = [
+        { brand: 'Chromium', version: majorVersion },
+        { brand: 'Google Chrome', version: majorVersion },
+        { brand: 'Not-A.Brand', version: '8' },
+      ];
+      const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' + version + ' Safari/537.36';
+
+      Object.defineProperty(navigator, 'userAgent', { get: () => ua });
+      if (navigator.userAgentData) {
+        Object.defineProperty(navigator.userAgentData, 'brands', { get: () => brands });
+        Object.defineProperty(navigator.userAgentData, 'platform', { get: () => 'Windows' });
+        Object.defineProperty(navigator.userAgentData, 'mobile', { get: () => false });
+      }
+    })();
   } catch (_) {}
 })();
 "#;
