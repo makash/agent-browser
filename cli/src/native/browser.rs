@@ -394,9 +394,11 @@ impl BrowserManager {
         self.client
             .send_command_no_params("Page.enable", Some(session_id))
             .await?;
-        self.client
-            .send_command_no_params("Runtime.enable", Some(session_id))
-            .await?;
+        // Runtime.enable intentionally omitted — it is the #1 CDP detection vector.
+        // Cloudflare and DataDome detect its side effects (execution context reporting).
+        // Runtime.evaluate and Runtime.callFunctionOn work without it.
+        // Trade-off: Runtime.consoleAPICalled and Runtime.exceptionThrown events
+        // will not fire, so console log capture is disabled.
         self.client
             .send_command_no_params("Network.enable", Some(session_id))
             .await?;
