@@ -140,6 +140,73 @@ pub const DEFAULT_STEALTH_PRESET: &str = r#"
         get: () => 100,
       });
     }
+
+    // Canvas fingerprint noise — seeded PRNG for deterministic noise per session
+    (() => {
+      const seed = Math.floor(Math.random() * 2147483647);
+      let s = seed;
+      const prng = () => { s = (s * 16807 + 0) % 2147483647; return (s & 0xff) - 128; };
+
+      const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+      const origToBlob = HTMLCanvasElement.prototype.toBlob;
+      const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+
+      const noisifyImageData = (imageData) => {
+        const d = imageData.data;
+        let localSeed = seed;
+        for (let i = 0; i < d.length && i < 1024; i += 4) {
+          localSeed = (localSeed * 16807 + 0) % 2147483647;
+          const noise = (localSeed & 3) - 1; // -1, 0, 1, or 2
+          d[i] = Math.max(0, Math.min(255, d[i] + noise));
+        }
+        return imageData;
+      };
+
+      Object.defineProperty(CanvasRenderingContext2D.prototype, 'getImageData', {
+        value: function() {
+          const imageData = origGetImageData.apply(this, arguments);
+          return noisifyImageData(imageData);
+        },
+        writable: true,
+        configurable: true,
+      });
+      // Preserve toString
+      CanvasRenderingContext2D.prototype.getImageData.toString = () => 'function getImageData() { [native code] }';
+
+      Object.defineProperty(HTMLCanvasElement.prototype, 'toDataURL', {
+        value: function() {
+          const ctx = this.getContext('2d');
+          if (ctx) {
+            try {
+              const imageData = origGetImageData.call(ctx, 0, 0, this.width, this.height);
+              noisifyImageData(imageData);
+              ctx.putImageData(imageData, 0, 0);
+            } catch (_) {}
+          }
+          return origToDataURL.apply(this, arguments);
+        },
+        writable: true,
+        configurable: true,
+      });
+      HTMLCanvasElement.prototype.toDataURL.toString = () => 'function toDataURL() { [native code] }';
+
+      Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', {
+        value: function() {
+          const ctx = this.getContext('2d');
+          if (ctx) {
+            try {
+              const imageData = origGetImageData.call(ctx, 0, 0, this.width, this.height);
+              noisifyImageData(imageData);
+              ctx.putImageData(imageData, 0, 0);
+            } catch (_) {}
+          }
+          return origToBlob.apply(this, arguments);
+        },
+        writable: true,
+        configurable: true,
+      });
+      HTMLCanvasElement.prototype.toBlob.toString = () => 'function toBlob() { [native code] }';
+    })();
   } catch (_) {}
 })();
 "#;
