@@ -1,10 +1,18 @@
 pub const DEFAULT_STEALTH_PRESET: &str = r#"
 (() => {
   try {
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => undefined,
-    });
+    // Delete webdriver from the Navigator prototype before redefining
     try { delete Object.getPrototypeOf(navigator).webdriver; } catch (_) {}
+    Object.defineProperty(Object.getPrototypeOf(navigator), 'webdriver', {
+      get: () => false,
+      configurable: false,
+      enumerable: true,
+    });
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => false,
+      configurable: false,
+      enumerable: true,
+    });
 
     if (!window.chrome) {
       window.chrome = {
