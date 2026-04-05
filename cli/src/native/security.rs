@@ -216,6 +216,73 @@ pub const DEFAULT_STEALTH_PRESET: &str = r#"
       HTMLCanvasElement.prototype.toBlob.toString = () => 'function toBlob() { [native code] }';
     })();
 
+    // AudioContext fingerprint noise — seeded PRNG, same pattern as Canvas
+    (() => {
+      const seed = Math.floor(Math.random() * 2147483647);
+      if (typeof OfflineAudioContext !== 'undefined') {
+        const origGetChannelData = AudioBuffer.prototype.getChannelData;
+        Object.defineProperty(AudioBuffer.prototype, 'getChannelData', {
+          value: function(channel) {
+            const data = origGetChannelData.call(this, channel);
+            if (!data._stealth) {
+              let localSeed = seed;
+              for (let i = 0; i < data.length && i < 1024; i++) {
+                localSeed = (localSeed * 16807 + 0) % 2147483647;
+                const noise = ((localSeed % 3) - 1) * 0.0001;
+                data[i] = data[i] + noise;
+              }
+              data._stealth = true;
+            }
+            return data;
+          },
+          writable: true, configurable: true,
+        });
+        AudioBuffer.prototype.getChannelData.toString = () => 'function getChannelData() { [native code] }';
+
+        const origCopyFromChannel = AudioBuffer.prototype.copyFromChannel;
+        Object.defineProperty(AudioBuffer.prototype, 'copyFromChannel', {
+          value: function(dest, channelNumber, startInChannel) {
+            origCopyFromChannel.call(this, dest, channelNumber, startInChannel || 0);
+            let localSeed = seed;
+            for (let i = 0; i < dest.length && i < 1024; i++) {
+              localSeed = (localSeed * 16807 + 0) % 2147483647;
+              const noise = ((localSeed % 3) - 1) * 0.0001;
+              dest[i] = dest[i] + noise;
+            }
+            return undefined;
+          },
+          writable: true, configurable: true,
+        });
+        AudioBuffer.prototype.copyFromChannel.toString = () => 'function copyFromChannel() { [native code] }';
+      }
+    })();
+
+    // WebRTC IP leak prevention — force relay-only ICE policy, strip STUN servers
+    (() => {
+      if (typeof RTCPeerConnection !== 'undefined') {
+        const OrigRTC = RTCPeerConnection;
+        window.RTCPeerConnection = function(config) {
+          config = config || {};
+          config.iceTransportPolicy = 'relay';
+          if (config.iceServers) {
+            config.iceServers = config.iceServers.filter(s => {
+              const urls = Array.isArray(s.urls) ? s.urls : [s.urls || s.url];
+              return urls.some(u => u && u.startsWith('turn:'));
+            });
+          }
+          return new OrigRTC(config);
+        };
+        window.RTCPeerConnection.prototype = OrigRTC.prototype;
+        Object.defineProperty(window, 'RTCPeerConnection', {
+          writable: true, configurable: true,
+        });
+        RTCPeerConnection.toString = () => 'function RTCPeerConnection() { [native code] }';
+      }
+      if (typeof webkitRTCPeerConnection !== 'undefined') {
+        window.webkitRTCPeerConnection = window.RTCPeerConnection;
+      }
+    })();
+
     // UA/Client Hints auto-discovery from stealth proxy
     (() => {
       let version = '133.0.0.0';

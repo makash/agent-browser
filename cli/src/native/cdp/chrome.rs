@@ -116,6 +116,8 @@ fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
         "--disable-features=Translate,AutomationControlled".to_string(),
         "--disable-blink-features=AutomationControlled".to_string(),
         "--enable-features=NetworkService,NetworkServiceInProcess".to_string(),
+        "--enforce-webrtc-ip-permission-check".to_string(),
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp".to_string(),
         "--metrics-recording-only".to_string(),
         "--password-store=basic".to_string(),
         "--use-mock-keychain".to_string(),
