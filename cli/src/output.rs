@@ -2520,6 +2520,9 @@ Install (recommended, fastest - native Rust CLI):
   npm install -g agent-browser
   agent-browser install                  # Download Chromium (first time)
 
+Standalone release binaries:
+  If the packaged Node.js daemon is not present, agent-browser falls back to the native Rust daemon automatically.
+
 Try without installing (slower, routes through Node.js):
   npx agent-browser open example.com
 

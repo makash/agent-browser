@@ -519,6 +519,8 @@ Priority (lowest to highest): `~/.agent-browser/config.json` < `./agent-browser.
 
 agent-browser has an experimental native Rust daemon that communicates with Chrome directly via CDP, bypassing Node.js and Playwright entirely. It is opt-in and not recommended for production use yet.
 
+Standalone release binaries automatically fall back to the native daemon when the packaged Node.js runtime files are not present, so they can run from arbitrary install paths.
+
 ```bash
 # Enable via flag
 agent-browser --native open example.com

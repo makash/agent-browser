@@ -10,6 +10,8 @@ agent-browser includes an experimental native Rust daemon that communicates with
 
 Native mode is opt-in. Enable it with the `--native` flag or the `AGENT_BROWSER_NATIVE` environment variable.
 
+Standalone release binaries also fall back to the native daemon automatically when the packaged Node.js runtime files are not available.
+
 ### CLI Flag
 
 ```bash
