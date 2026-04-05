@@ -303,6 +303,55 @@ fn apply_daemon_env(cmd: &mut Command, session: &str, opts: &DaemonOptions) {
     }
 }
 
+fn spawn_native_daemon(
+    exe_path: &PathBuf,
+    session: &str,
+    opts: &DaemonOptions,
+) -> Result<std::process::Child, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        let mut cmd = Command::new(exe_path);
+        cmd.env("AGENT_BROWSER_DAEMON", "1");
+        apply_daemon_env(&mut cmd, session, opts);
+
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+
+        return cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to start native daemon: {}", e));
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        let mut cmd = Command::new(exe_path);
+        cmd.env("AGENT_BROWSER_DAEMON", "1");
+        apply_daemon_env(&mut cmd, session, opts);
+
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+
+        return cmd
+            .creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to start native daemon: {}", e));
+    }
+}
+
 pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult, String> {
     // Check if daemon is running AND responsive
     if is_daemon_running(session) && daemon_ready(session) {
@@ -377,51 +426,7 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
     let mut daemon_child: Option<std::process::Child> = None;
 
     if opts.native {
-        // Native mode: spawn self as daemon (Rust/CDP, no Node.js needed)
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-
-            let mut cmd = Command::new(&exe_path);
-            cmd.env("AGENT_BROWSER_DAEMON", "1");
-            apply_daemon_env(&mut cmd, session, opts);
-
-            unsafe {
-                cmd.pre_exec(|| {
-                    libc::setsid();
-                    Ok(())
-                });
-            }
-
-            daemon_child = Some(
-                cmd.stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|e| format!("Failed to start native daemon: {}", e))?,
-            );
-        }
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-
-            let mut cmd = Command::new(&exe_path);
-            cmd.env("AGENT_BROWSER_DAEMON", "1");
-            apply_daemon_env(&mut cmd, session, opts);
-
-            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-            const DETACHED_PROCESS: u32 = 0x00000008;
-
-            daemon_child = Some(
-                cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|e| format!("Failed to start native daemon: {}", e))?,
-            );
-        }
+        daemon_child = Some(spawn_native_daemon(&exe_path, session, opts)?);
     } else {
         // Default mode: spawn Node.js daemon (Playwright)
         let exe_dir = exe_path.parent().unwrap();
@@ -438,57 +443,63 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
             daemon_paths.insert(1, home_path.join("daemon.js"));
         }
 
-        let daemon_path = daemon_paths
-            .iter()
-            .find(|p| p.exists())
-            .ok_or("Daemon not found. Set AGENT_BROWSER_HOME environment variable or run from project directory.")?;
+        let daemon_path = daemon_paths.iter().find(|p| p.exists());
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
+        if daemon_path.is_none() {
+            // Standalone release binaries only ship the Rust executable. If the
+            // packaged Node.js daemon assets are unavailable, fall back to the
+            // native daemon so the binary still works from arbitrary paths.
+            daemon_child = Some(spawn_native_daemon(&exe_path, session, opts)?);
+        } else {
+            let daemon_path = daemon_path.unwrap();
 
-            let mut cmd = Command::new("node");
-            cmd.arg(daemon_path);
-            apply_daemon_env(&mut cmd, session, opts);
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
 
-            unsafe {
-                cmd.pre_exec(|| {
-                    libc::setsid();
-                    Ok(())
-                });
+                let mut cmd = Command::new("node");
+                cmd.arg(daemon_path);
+                apply_daemon_env(&mut cmd, session, opts);
+
+                unsafe {
+                    cmd.pre_exec(|| {
+                        libc::setsid();
+                        Ok(())
+                    });
+                }
+
+                daemon_child = Some(
+                    cmd.stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                        .map_err(|e| format!("Failed to start daemon: {}", e))?,
+                );
             }
 
-            daemon_child = Some(
-                cmd.stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|e| format!("Failed to start daemon: {}", e))?,
-            );
-        }
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
 
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
+                // Use node.exe explicitly to avoid Git Bash/MSYS2 shell wrapper resolution
+                let mut cmd = Command::new("node.exe");
+                cmd.arg(daemon_path)
+                    .env("MSYS_NO_PATHCONV", "1")
+                    .env("MSYS2_ARG_CONV_EXCL", "*");
+                apply_daemon_env(&mut cmd, session, opts);
 
-            // Use node.exe explicitly to avoid Git Bash/MSYS2 shell wrapper resolution
-            let mut cmd = Command::new("node.exe");
-            cmd.arg(daemon_path)
-                .env("MSYS_NO_PATHCONV", "1")
-                .env("MSYS2_ARG_CONV_EXCL", "*");
-            apply_daemon_env(&mut cmd, session, opts);
+                const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+                const DETACHED_PROCESS: u32 = 0x00000008;
 
-            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-            const DETACHED_PROCESS: u32 = 0x00000008;
-
-            daemon_child = Some(
-                cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|e| format!("Failed to start daemon: {}", e))?,
-            );
+                daemon_child = Some(
+                    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                        .map_err(|e| format!("Failed to start daemon: {}", e))?,
+                );
+            }
         }
     }
 

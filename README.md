@@ -73,6 +73,8 @@ agent-browser install  # Download Chromium
 
 This is the fastest option -- commands run through the native Rust CLI directly with sub-millisecond parsing overhead.
 
+If you install a standalone release binary instead of the npm package, `agent-browser` automatically falls back to the native Rust daemon when the packaged Node.js runtime files are not present.
+
 ### Quick Start (no install)
 
 Run directly with `npx` if you want to try it without installing globally:
@@ -105,6 +107,10 @@ npx agent-browser open example.com
 brew install agent-browser
 agent-browser install  # Download Chromium
 ```
+
+### Standalone Release Binary
+
+GitHub release binaries work without a source checkout or npm package layout. When `daemon.js` is not present next to the binary, `agent-browser` automatically uses the native Rust daemon.
 
 ### From Source
 
