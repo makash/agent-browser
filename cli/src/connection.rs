@@ -323,12 +323,11 @@ fn spawn_native_daemon(
             });
         }
 
-        return cmd
-            .stdin(Stdio::null())
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to start native daemon: {}", e));
+            .map_err(|e| format!("Failed to start native daemon: {}", e))
     }
 
     #[cfg(windows)]
@@ -342,13 +341,12 @@ fn spawn_native_daemon(
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
         const DETACHED_PROCESS: u32 = 0x00000008;
 
-        return cmd
-            .creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS)
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to start native daemon: {}", e));
+            .map_err(|e| format!("Failed to start native daemon: {}", e))
     }
 }
 
@@ -443,16 +441,7 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
             daemon_paths.insert(1, home_path.join("daemon.js"));
         }
 
-        let daemon_path = daemon_paths.iter().find(|p| p.exists());
-
-        if daemon_path.is_none() {
-            // Standalone release binaries only ship the Rust executable. If the
-            // packaged Node.js daemon assets are unavailable, fall back to the
-            // native daemon so the binary still works from arbitrary paths.
-            daemon_child = Some(spawn_native_daemon(&exe_path, session, opts)?);
-        } else {
-            let daemon_path = daemon_path.unwrap();
-
+        if let Some(daemon_path) = daemon_paths.iter().find(|p| p.exists()) {
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
@@ -500,6 +489,11 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
                         .map_err(|e| format!("Failed to start daemon: {}", e))?,
                 );
             }
+        } else {
+            // Standalone release binaries only ship the Rust executable. If the
+            // packaged Node.js daemon assets are unavailable, fall back to the
+            // native daemon so the binary still works from arbitrary paths.
+            daemon_child = Some(spawn_native_daemon(&exe_path, session, opts)?);
         }
     }
 
