@@ -1,6 +1,64 @@
 # agent-browser
 
-Headless browser automation CLI for AI agents. Fast Rust CLI with Node.js fallback.
+This repository is a security-scanner-focused fork of `agent-browser`.
+
+It exists to make the Rust-native browser backend viable for security scanning workloads that need stronger stealth and network safety guarantees than upstream currently exposes.
+
+Specifically, this fork is being developed so scanners can use `agent-browser` with Playwright-style:
+
+- pre-navigation script injection
+- built-in stealth hardening
+- strict SSRF protection for navigation and sub-resources
+- Cloudflare challenge wait handling
+
+If you are looking for the general-purpose upstream project, see `vercel-labs/agent-browser`. If you are building or running a scanner and want the Rust-native path with stealth and SSRF protections, this fork is the relevant codebase.
+
+> **Fork status:** purpose-built for security scanners first, upstreamability second.
+
+## Native Security Mode
+
+The native Rust path can now do more than just basic automation. In `--native` mode, `agent-browser` supports:
+
+- pre-navigation init script injection
+- a built-in `stealth` preset for anti-fingerprinting patches
+- a built-in `ssrf-protect` preset for blocking private and special-use destinations
+- atomic Cloudflare challenge detect-and-wait
+
+That is the whole point of this fork: make `agent-browser` practical inside security scanners where lower memory usage and lower token usage are only useful if the browser still behaves safely and stealthily.
+
+### Probe Before / After
+
+Measured on the local pre-navigation stealth probe in [test/e2e/fixtures/stealth-probe.html](test/e2e/fixtures/stealth-probe.html).
+
+<table>
+  <tr>
+    <td><strong>Before: agent-browser normal</strong></td>
+    <td><strong>After: agent-browser stealth</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/verification/evidence/2026-03-10-stealth/agent-browser-normal.png" alt="agent-browser normal stealth probe score 4/7" width="420"></td>
+    <td><img src="docs/verification/evidence/2026-03-10-stealth/agent-browser-stealth.png" alt="agent-browser stealth probe score 7/7" width="420"></td>
+  </tr>
+</table>
+
+### Probe Comparison Table
+
+Measured on the local pre-navigation stealth probe:
+
+| Stealth surface | agent-browser normal | Playwright normal | agent-browser stealth | Playwright stealth |
+| --- | --- | --- | --- | --- |
+| `navigator.webdriver` masked | FAIL | FAIL | PASS | PASS |
+| `window.chrome` present | PASS | FAIL | PASS | PASS |
+| realistic `navigator.plugins` | PASS | FAIL | PASS | PASS |
+| `languages` + `language` patched | PASS | FAIL | PASS | PASS |
+| WebGL vendor/renderer patched | FAIL | FAIL | PASS | PASS |
+| permissions query does not throw | PASS | PASS | PASS | PASS |
+| hardware profile patched | FAIL | FAIL | PASS | FAIL |
+| probe score | `4/7` | `1/7` | `7/7` | `6/7` |
+
+The only miss in the measured `Playwright stealth` run was the hardware profile row: `connection.rtt` stayed at `50`, while the probe expected `100`.
+
+The full workflow, screenshots, and JSON artifacts live in [docs/verification/stealth-validation.md](docs/verification/stealth-validation.md).
 
 ## Installation
 
@@ -14,6 +72,8 @@ agent-browser install  # Download Chromium
 ```
 
 This is the fastest option -- commands run through the native Rust CLI directly with sub-millisecond parsing overhead.
+
+If you install a standalone release binary instead of the npm package, `agent-browser` automatically falls back to the native Rust daemon when the packaged Node.js runtime files are not present.
 
 ### Quick Start (no install)
 
@@ -48,10 +108,14 @@ brew install agent-browser
 agent-browser install  # Download Chromium
 ```
 
+### Standalone Release Binary
+
+GitHub release binaries work without a source checkout or npm package layout. When `daemon.js` is not present next to the binary, `agent-browser` automatically uses the native Rust daemon.
+
 ### From Source
 
 ```bash
-git clone https://github.com/vercel-labs/agent-browser
+git clone git@github.com:makash/agent-browser.git
 cd agent-browser
 pnpm install
 pnpm build
@@ -231,6 +295,27 @@ agent-browser network unroute [url]            # Remove routes
 agent-browser network requests                 # View tracked requests
 agent-browser network requests --filter api    # Filter requests
 ```
+
+### Security Presets (Native Mode)
+
+These commands currently target the native Rust backend. Use `--native` or set `AGENT_BROWSER_NATIVE=1`.
+
+```bash
+agent-browser --native init-script add --js "window.__test=true"
+agent-browser --native init-script list
+agent-browser --native init-script remove <id>
+agent-browser --native init-script clear
+
+agent-browser --native stealth enable          # Install built-in anti-fingerprinting preset
+agent-browser --native stealth disable
+
+agent-browser --native ssrf-protect enable     # Block private/special-use network destinations
+agent-browser --native ssrf-protect disable
+
+agent-browser --native wait challenge cloudflare --timeout 15000
+```
+
+The built-in `stealth` preset installs pre-navigation patches before page JavaScript runs. The built-in `ssrf-protect` preset validates navigation and sub-resource requests before dispatch and blocks loopback, RFC1918, link-local, unique-local, and other special-use destinations.
 
 ### Tabs & Windows
 

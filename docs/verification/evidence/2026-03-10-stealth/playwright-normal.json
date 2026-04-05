@@ -1,0 +1,50 @@
+{
+  "url": "http://127.0.0.1:4311/stealth-probe.html",
+  "generatedAt": "2026-03-10T17:29:45.251Z",
+  "early": {
+    "webdriver": true,
+    "hasChrome": false,
+    "pluginsLength": 0,
+    "pluginNames": [],
+    "languages": [
+      "en-US"
+    ],
+    "language": "en-US",
+    "webglVendor": "Google Inc. (Google)",
+    "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+    "hardwareConcurrency": 10,
+    "deviceMemory": 8,
+    "platform": "MacIntel",
+    "connectionRtt": 0
+  },
+  "final": {
+    "webdriver": true,
+    "hasChrome": false,
+    "pluginsLength": 0,
+    "pluginNames": [],
+    "languages": [
+      "en-US"
+    ],
+    "language": "en-US",
+    "webglVendor": "Google Inc. (Google)",
+    "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+    "hardwareConcurrency": 10,
+    "deviceMemory": 8,
+    "platform": "MacIntel",
+    "connectionRtt": 0,
+    "permissions": {
+      "status": "prompt"
+    }
+  },
+  "checks": {
+    "webdriverMasked": false,
+    "chromePresent": false,
+    "pluginsPresent": false,
+    "languagesPatched": false,
+    "webglPatched": false,
+    "permissionsPatched": true,
+    "hardwarePatched": false
+  },
+  "score": 1,
+  "maxScore": 7
+}

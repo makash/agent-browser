@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Stealth Probe</title>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --panel: #101a2f;
+        --panel-2: #17233f;
+        --text: #e5eefc;
+        --muted: #9cb0cf;
+        --pass: #2fbf71;
+        --fail: #ff6b6b;
+        --accent: #57b5ff;
+        --border: rgba(255, 255, 255, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        background:
+          radial-gradient(circle at top left, rgba(87, 181, 255, 0.16), transparent 28%),
+          radial-gradient(circle at top right, rgba(47, 191, 113, 0.12), transparent 24%),
+          linear-gradient(180deg, #0b1220 0%, #0e1526 100%);
+        color: var(--text);
+      }
+
+      main {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 40px 20px 64px;
+      }
+
+      h1,
+      h2 {
+        margin: 0 0 12px;
+      }
+
+      p {
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1.1fr 0.9fr;
+        align-items: start;
+      }
+
+      .card {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015));
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+      }
+
+      .score {
+        font-size: 64px;
+        font-weight: 700;
+        line-height: 1;
+        color: var(--accent);
+      }
+
+      .score-sub {
+        color: var(--muted);
+        margin-top: 8px;
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .pill {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 8px 12px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .pill strong {
+        color: var(--text);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .status {
+        font-weight: 700;
+      }
+
+      .status.pass {
+        color: var(--pass);
+      }
+
+      .status.fail {
+        color: var(--fail);
+      }
+
+      pre {
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: rgba(0, 0, 0, 0.25);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        color: #cce0ff;
+      }
+
+      @media (max-width: 800px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+
+        .score {
+          font-size: 52px;
+        }
+      }
+    </style>
+    <script>
+      (() => {
+        const readWebGl = () => {
+          try {
+            const canvas = document.createElement("canvas");
+            const gl =
+              canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+            if (!gl) {
+              return { vendor: null, renderer: null };
+            }
+
+            const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+            if (!debugInfo) {
+              return { vendor: null, renderer: null };
+            }
+
+            return {
+              vendor: gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL),
+              renderer: gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL),
+            };
+          } catch (error) {
+            return { vendor: null, renderer: String(error) };
+          }
+        };
+
+        window.captureStealthSurface = () => {
+          const webgl = readWebGl();
+          const connection = navigator.connection || {};
+          const plugins = Array.from(navigator.plugins || []).map((plugin) => plugin.name);
+
+          return {
+            webdriver:
+              typeof navigator.webdriver === "undefined"
+                ? "undefined"
+                : navigator.webdriver,
+            hasChrome: !!window.chrome,
+            pluginsLength: plugins.length,
+            pluginNames: plugins,
+            languages: Array.from(navigator.languages || []),
+            language: navigator.language || null,
+            webglVendor: webgl.vendor,
+            webglRenderer: webgl.renderer,
+            hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+            deviceMemory: navigator.deviceMemory ?? null,
+            platform: navigator.platform || null,
+            connectionRtt: connection.rtt ?? null
+          };
+        };
+
+        window.__stealth_probe_early = window.captureStealthSurface();
+      })();
+    </script>
+  </head>
+  <body>
+    <main class="grid">
+      <section class="hero">
+        <div class="card">
+          <h1>Stealth Probe</h1>
+          <p>
+            This page captures browser fingerprint values in an inline
+            <code>&lt;head&gt;</code> script before later page JavaScript runs.
+            If stealth injection is truly pre-navigation, the early snapshot
+            below will already contain the patched values.
+          </p>
+          <div class="pill-row" id="surface-pills"></div>
+        </div>
+        <div class="card">
+          <div class="score" id="score">0/7</div>
+          <div class="score-sub" id="score-sub">Collecting probe results...</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Checks</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Check</th>
+              <th>Expected</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="checks-body"></tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>Probe JSON</h2>
+        <pre id="report-json"></pre>
+      </section>
+    </main>
+
+    <script>
+      (async () => {
+        const queryPermissions = async () => {
+          if (!navigator.permissions || !navigator.permissions.query) {
+            return { status: "missing" };
+          }
+
+          try {
+            const result = await navigator.permissions.query({
+              name: "notifications"
+            });
+            return { status: result.state || "unknown" };
+          } catch (error) {
+            return { status: "error", error: String(error) };
+          }
+        };
+
+        const early = window.__stealth_probe_early || {};
+        const final = window.captureStealthSurface();
+        final.permissions = await queryPermissions();
+
+        const checks = {
+          webdriverMasked: early.webdriver === "undefined",
+          chromePresent: early.hasChrome === true,
+          pluginsPresent: (early.pluginsLength || 0) >= 3,
+          languagesPatched:
+            JSON.stringify(early.languages || []) === JSON.stringify(["en-US", "en"]) &&
+            early.language === "en-US",
+          webglPatched:
+            early.webglVendor === "Intel Inc." &&
+            early.webglRenderer === "Intel Iris OpenGL Engine",
+          permissionsPatched: final.permissions.status !== "error",
+          hardwarePatched:
+            early.hardwareConcurrency === 8 &&
+            early.deviceMemory === 8 &&
+            early.platform === "Win32" &&
+            early.connectionRtt === 100
+        };
+
+        const expectations = {
+          webdriverMasked: "navigator.webdriver === undefined",
+          chromePresent: "window.chrome exists",
+          pluginsPresent: "navigator.plugins has Chrome-like entries",
+          languagesPatched: "languages=['en-US','en'] and language='en-US'",
+          webglPatched: "Intel Inc. / Intel Iris OpenGL Engine",
+          permissionsPatched: "notifications query does not throw",
+          hardwarePatched: "8 cores, 8 GB, Win32, RTT 100"
+        };
+
+        const score = Object.values(checks).filter(Boolean).length;
+        const maxScore = Object.keys(checks).length;
+
+        const report = {
+          url: location.href,
+          generatedAt: new Date().toISOString(),
+          early,
+          final,
+          checks,
+          score,
+          maxScore
+        };
+
+        window.__stealth_probe_report = report;
+        document.title = `Stealth Probe ${score}/${maxScore}`;
+
+        const checksBody = document.getElementById("checks-body");
+        const pills = document.getElementById("surface-pills");
+        const reportJson = document.getElementById("report-json");
+        const scoreNode = document.getElementById("score");
+        const scoreSub = document.getElementById("score-sub");
+
+        const surfaceSummary = [
+          ["webdriver", String(early.webdriver)],
+          ["plugins", String(early.pluginsLength)],
+          ["language", String(early.language)],
+          ["webgl", `${early.webglVendor || "null"} / ${early.webglRenderer || "null"}`],
+          ["hardware", `${early.hardwareConcurrency || "null"} cores / ${early.deviceMemory || "null"} GB`]
+        ];
+
+        for (const [label, value] of surfaceSummary) {
+          const item = document.createElement("div");
+          item.className = "pill";
+          item.innerHTML = `<strong>${label}</strong>: ${value}`;
+          pills.appendChild(item);
+        }
+
+        for (const [name, passed] of Object.entries(checks)) {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td><code>${name}</code></td>
+            <td>${expectations[name]}</td>
+            <td class="status ${passed ? "pass" : "fail"}">${passed ? "PASS" : "FAIL"}</td>
+          `;
+          checksBody.appendChild(row);
+        }
+
+        scoreNode.textContent = `${score}/${maxScore}`;
+        scoreSub.textContent =
+          score === maxScore
+            ? "All stealth probe checks passed in the early page snapshot."
+            : `${maxScore - score} checks still look unpatched in the early page snapshot.`;
+        reportJson.textContent = JSON.stringify(report, null, 2);
+      })();
+    </script>
+  </body>
+</html>

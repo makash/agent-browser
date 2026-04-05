@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use super::cdp::client::CdpClient;
 
@@ -260,6 +261,112 @@ pub async fn install_domain_filter(
 }
 
 // ---------------------------------------------------------------------------
+// Strict SSRF protection
+// ---------------------------------------------------------------------------
+
+pub async fn check_ssrf_safe_url(url: &str) -> Result<Vec<String>, String> {
+    let parsed = url::Url::parse(url).map_err(|_| format!("Invalid URL: {}", url))?;
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(format!(
+            "Strict SSRF protection only allows http/https requests, got '{}'",
+            scheme
+        ));
+    }
+
+    let host = parsed
+        .host()
+        .ok_or_else(|| format!("No hostname in URL: {}", url))?;
+
+    match host {
+        url::Host::Ipv4(ip) => {
+            assert_safe_ip(IpAddr::V4(ip), &ip.to_string())?;
+            Ok(vec![ip.to_string()])
+        }
+        url::Host::Ipv6(ip) => {
+            assert_safe_ip(IpAddr::V6(ip), &ip.to_string())?;
+            Ok(vec![ip.to_string()])
+        }
+        url::Host::Domain(domain) => {
+            let port = parsed.port_or_known_default().unwrap_or(80);
+            let resolved = tokio::net::lookup_host((domain, port))
+                .await
+                .map_err(|e| format!("DNS resolution failed for {}: {}", domain, e))?;
+
+            let mut ips = Vec::new();
+            for addr in resolved {
+                let ip = addr.ip();
+                let ip_str = ip.to_string();
+                assert_safe_ip(ip, &ip_str)?;
+                if !ips.contains(&ip_str) {
+                    ips.push(ip_str);
+                }
+            }
+
+            if ips.is_empty() {
+                return Err(format!(
+                    "DNS resolution returned no addresses for {}",
+                    domain
+                ));
+            }
+
+            Ok(ips)
+        }
+    }
+}
+
+fn assert_safe_ip(ip: IpAddr, display: &str) -> Result<(), String> {
+    match ip {
+        IpAddr::V4(ipv4) => {
+            if is_blocked_ipv4(ipv4) {
+                return Err(format!(
+                    "Blocked private or special-use IPv4 address {}",
+                    display
+                ));
+            }
+        }
+        IpAddr::V6(ipv6) => {
+            if let Some(mapped) = ipv6.to_ipv4_mapped() {
+                if is_blocked_ipv4(mapped) {
+                    return Err(format!(
+                        "Blocked IPv4-mapped private or special-use IPv6 address {}",
+                        display
+                    ));
+                }
+                return Ok(());
+            }
+            if is_blocked_ipv6(ipv6) {
+                return Err(format!(
+                    "Blocked private or special-use IPv6 address {}",
+                    display
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn is_blocked_ipv4(ip: Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || octets[0] == 0
+}
+
+fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || (segments[0] & 0xfe00) == 0xfc00
+        || (segments[0] & 0xffc0) == 0xfe80
+}
+
+// ---------------------------------------------------------------------------
 // Console and error tracking
 // ---------------------------------------------------------------------------
 
@@ -343,6 +450,47 @@ impl EventTracker {
             })
             .collect();
         json!({ "errors": entries })
+    }
+}
+
+#[cfg(test)]
+mod ssrf_tests {
+    use super::{check_ssrf_safe_url, is_blocked_ipv4, is_blocked_ipv6};
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn blocks_private_ipv4_ranges() {
+        assert!(is_blocked_ipv4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert!(is_blocked_ipv4(Ipv4Addr::new(10, 0, 0, 1)));
+        assert!(is_blocked_ipv4(Ipv4Addr::new(172, 16, 0, 1)));
+        assert!(is_blocked_ipv4(Ipv4Addr::new(192, 168, 1, 1)));
+        assert!(is_blocked_ipv4(Ipv4Addr::new(169, 254, 0, 1)));
+        assert!(is_blocked_ipv4(Ipv4Addr::new(0, 1, 2, 3)));
+    }
+
+    #[test]
+    fn allows_public_ipv4() {
+        assert!(!is_blocked_ipv4(Ipv4Addr::new(93, 184, 216, 34)));
+    }
+
+    #[test]
+    fn blocks_private_ipv6_ranges() {
+        assert!(is_blocked_ipv6(Ipv6Addr::LOCALHOST));
+        assert!(is_blocked_ipv6("fc00::1".parse().unwrap()));
+        assert!(is_blocked_ipv6("fe80::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn allows_public_ipv6() {
+        assert!(!is_blocked_ipv6(
+            "2606:2800:220:1:248:1893:25c8:1946".parse().unwrap()
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_non_http_schemes() {
+        let err = check_ssrf_safe_url("file:///etc/passwd").await.unwrap_err();
+        assert!(err.contains("only allows http/https"));
     }
 }
 

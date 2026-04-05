@@ -1,0 +1,204 @@
+name: GitHub Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build and release (tag or branch)
+        required: true
+        default: feat/stealth-ssrf-protections
+      tag:
+        description: Release tag to create or update
+        required: true
+        default: v0.1.2
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: agent-browser-linux-x64
+            use_zigbuild: true
+          - name: Linux ARM64
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: agent-browser-linux-arm64
+            use_zigbuild: true
+          - name: macOS x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            binary: agent-browser-darwin-x64
+            use_zigbuild: false
+          - name: macOS ARM64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            binary: agent-browser-darwin-arm64
+            use_zigbuild: false
+
+    steps:
+      - name: Determine ref
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=${{ github.event.inputs.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.ref }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install npm dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-x86-64-linux-gnu
+
+      - name: Install cargo-zigbuild
+        if: matrix.use_zigbuild
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Configure Linux linkers
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << 'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+
+      - name: Build with zigbuild
+        if: matrix.use_zigbuild
+        run: cargo zigbuild --release --manifest-path cli/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Build with cargo
+        if: '!matrix.use_zigbuild'
+        run: cargo build --release --manifest-path cli/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Copy binary
+        run: |
+          mkdir -p artifacts
+          cp cli/target/${{ matrix.target }}/release/agent-browser artifacts/${{ matrix.binary }}
+          chmod +x artifacts/${{ matrix.binary }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: artifacts/${{ matrix.binary }}
+          retention-days: 7
+
+  github-release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs: build-binaries
+    steps:
+      - name: Determine release metadata
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=${{ github.event.inputs.ref }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.ref }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Move binaries into bin directory
+        run: |
+          mkdir -p bin
+          find artifacts -type f -name 'agent-browser-*' -exec mv {} bin/ \;
+          rm -rf artifacts
+          chmod +x bin/agent-browser-* 2>/dev/null || true
+          ls -la bin/
+
+      - name: Verify expected binaries
+        run: |
+          EXPECTED=(
+            "agent-browser-linux-x64"
+            "agent-browser-linux-arm64"
+            "agent-browser-darwin-x64"
+            "agent-browser-darwin-arm64"
+          )
+          for binary in "${EXPECTED[@]}"; do
+            test -f "bin/$binary" || (echo "Missing $binary" && exit 1)
+          done
+
+      - name: Create release notes
+        run: |
+          cat > RELEASE_NOTES.md <<EOF
+          Multi-platform binary release for \`${{ steps.vars.outputs.tag }}\`.
+
+          Included assets:
+
+          - agent-browser-linux-x64
+          - agent-browser-linux-arm64
+          - agent-browser-darwin-x64
+          - agent-browser-darwin-arm64
+          EOF
+
+      - name: Create or update GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          if gh release view "$TAG" &>/dev/null; then
+            gh release upload "$TAG" bin/agent-browser-* --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file RELEASE_NOTES.md \
+              bin/agent-browser-*
+          fi

@@ -27,114 +27,61 @@ use output::{
     print_command_help, print_help, print_response_with_opts, print_version, OutputOptions,
 };
 
-use std::path::PathBuf;
-use std::process::Command as ProcessCommand;
-
-/// Run a local auth command (auth_save/list/show/delete) via node auth-cli.js.
-/// These commands don't need a browser, so we handle them directly to avoid
-/// sending passwords through the daemon's Unix socket channel.
+/// Run auth commands locally without starting the browser daemon.
+/// This keeps passwords off the socket and lets standalone release binaries
+/// work without the packaged Node.js helper scripts.
 fn run_auth_cli(cmd: &serde_json::Value, json_mode: bool) -> ! {
-    let exe_path = env::current_exe().unwrap_or_default();
-    let exe_path = exe_path.canonicalize().unwrap_or(exe_path);
-    #[cfg(windows)]
-    let exe_path = {
-        let p = exe_path.to_string_lossy();
-        if let Some(stripped) = p.strip_prefix(r"\\?\") {
-            PathBuf::from(stripped)
-        } else {
-            exe_path
+    let action = cmd.get("action").and_then(|v| v.as_str());
+    let result = match action {
+        Some("auth_save") => native::auth::auth_save(
+            cmd.get("name").and_then(|v| v.as_str()).unwrap_or_default(),
+            cmd.get("url").and_then(|v| v.as_str()).unwrap_or_default(),
+            cmd.get("username")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
+            cmd.get("password")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
+            cmd.get("usernameSelector").and_then(|v| v.as_str()),
+            cmd.get("passwordSelector").and_then(|v| v.as_str()),
+            cmd.get("submitSelector").and_then(|v| v.as_str()),
+        ),
+        Some("auth_list") => native::auth::credentials_list(),
+        Some("auth_show") => {
+            native::auth::auth_show(cmd.get("name").and_then(|v| v.as_str()).unwrap_or_default())
         }
-    };
-    let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
-
-    let mut script_paths = vec![
-        exe_dir.join("auth-cli.js"),
-        exe_dir.join("../dist/auth-cli.js"),
-        PathBuf::from("dist/auth-cli.js"),
-    ];
-
-    if let Ok(home) = env::var("AGENT_BROWSER_HOME") {
-        let home_path = PathBuf::from(&home);
-        script_paths.insert(0, home_path.join("dist/auth-cli.js"));
-        script_paths.insert(1, home_path.join("auth-cli.js"));
-    }
-
-    let script_path = match script_paths.iter().find(|p| p.exists()) {
-        Some(p) => p.clone(),
-        None => {
-            if json_mode {
-                println!(r#"{{"success":false,"error":"auth-cli.js not found"}}"#);
-            } else {
-                eprintln!(
-                    "{} auth-cli.js not found. Set AGENT_BROWSER_HOME or run from project directory.",
-                    color::error_indicator()
-                );
-            }
-            exit(1);
-        }
+        Some("auth_delete") => native::auth::credentials_delete(
+            cmd.get("name").and_then(|v| v.as_str()).unwrap_or_default(),
+        ),
+        Some(other) => Err(format!("Unsupported auth action: {}", other)),
+        None => Err("Missing auth action".to_string()),
     };
 
-    let cmd_json = serde_json::to_string(cmd).unwrap_or_default();
+    let response = match result {
+        Ok(data) => connection::Response {
+            success: true,
+            data: Some(data),
+            error: None,
+        },
+        Err(error) => connection::Response {
+            success: false,
+            data: None,
+            error: Some(error),
+        },
+    };
 
-    match ProcessCommand::new("node")
-        .arg(&script_path)
-        .arg(&cmd_json)
-        .output()
-    {
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if !stderr.is_empty() {
-                eprint!("{}", stderr);
-            }
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stdout = stdout.trim();
-
-            if stdout.is_empty() {
-                if json_mode {
-                    println!(r#"{{"success":false,"error":"No response from auth-cli"}}"#);
-                } else {
-                    eprintln!("{} No response from auth-cli", color::error_indicator());
-                }
-                exit(1);
-            }
-
-            if json_mode {
-                println!("{}", stdout);
-            } else {
-                // Parse the JSON response and use the standard output formatter
-                match serde_json::from_str::<connection::Response>(stdout) {
-                    Ok(resp) => {
-                        let action = cmd.get("action").and_then(|v| v.as_str());
-                        let opts = OutputOptions {
-                            json: false,
-                            content_boundaries: false,
-                            max_output: None,
-                        };
-                        print_response_with_opts(&resp, action, &opts);
-                        if !resp.success {
-                            exit(1);
-                        }
-                    }
-                    Err(_) => {
-                        println!("{}", stdout);
-                    }
-                }
-            }
-            exit(output.status.code().unwrap_or(0));
-        }
-        Err(e) => {
-            if json_mode {
-                println!(
-                    r#"{{"success":false,"error":"Failed to run auth-cli: {}"}}"#,
-                    e
-                );
-            } else {
-                eprintln!("{} Failed to run auth-cli: {}", color::error_indicator(), e);
-            }
-            exit(1);
-        }
+    if json_mode {
+        println!("{}", serde_json::to_string(&response).unwrap_or_default());
+    } else {
+        let opts = OutputOptions {
+            json: false,
+            content_boundaries: false,
+            max_output: None,
+        };
+        print_response_with_opts(&response, action, &opts);
     }
+
+    exit(if response.success { 0 } else { 1 });
 }
 
 fn parse_proxy(proxy_str: &str) -> serde_json::Value {

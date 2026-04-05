@@ -165,6 +165,30 @@ agent-browser network requests --clear         # Clear request log
 agent-browser network requests --filter <pat>  # Filter by URL pattern
 ```
 
+## Security presets (native mode)
+
+These commands are currently available in the native Rust backend. Run them with `--native` or `AGENT_BROWSER_NATIVE=1`.
+
+```bash
+agent-browser --native init-script add --js "window.__test=true"
+agent-browser --native init-script list
+agent-browser --native init-script remove <id>
+agent-browser --native init-script clear
+
+agent-browser --native stealth enable
+agent-browser --native stealth disable
+
+agent-browser --native ssrf-protect enable
+agent-browser --native ssrf-protect disable
+
+agent-browser --native wait challenge cloudflare --timeout 15000
+```
+
+- `init-script` registers JavaScript with `Page.addScriptToEvaluateOnNewDocument`, so it runs before page JavaScript and persists across later navigations in the same session.
+- `stealth enable` installs the built-in anti-fingerprinting preset used to reduce automation detection.
+- `ssrf-protect enable` enforces strict request blocking for private and special-use destinations across navigation and sub-resource requests.
+- `wait challenge cloudflare` atomically detects and waits for common Cloudflare challenges, returning a structured status instead of requiring a separate detect step.
+
 ## Tabs & frames
 
 ```bash

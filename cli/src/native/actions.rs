@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::env;
 use tokio::sync::broadcast;
 
@@ -18,6 +19,7 @@ use super::policy::{ActionPolicy, ConfirmActions, PolicyResult};
 use super::providers;
 use super::recording::{self, RecordingState};
 use super::screenshot::{self, ScreenshotOptions};
+use super::security;
 use super::snapshot::{self, SnapshotOptions};
 use super::state;
 use super::storage;
@@ -54,6 +56,21 @@ pub struct RouteResponse {
     pub headers: Option<std::collections::HashMap<String, String>>,
 }
 
+pub struct InitScriptEntry {
+    pub logical_id: String,
+    pub source: String,
+    pub identifiers_by_session: HashMap<String, String>,
+}
+
+pub struct StealthPresetState {
+    pub preset: String,
+    pub script_id: String,
+}
+
+pub struct SsrfProtectionState {
+    pub preset: String,
+}
+
 #[derive(Clone, serde::Serialize)]
 pub struct TrackedRequest {
     pub url: String,
@@ -62,11 +79,18 @@ pub struct TrackedRequest {
     pub timestamp: u64,
     #[serde(rename = "resourceType")]
     pub resource_type: String,
+    #[serde(rename = "blockedReason", skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<String>,
+    #[serde(rename = "blockedBy", skip_serializing_if = "Option::is_none")]
+    pub blocked_by: Option<String>,
+    #[serde(rename = "resolvedIps", skip_serializing_if = "Option::is_none")]
+    pub resolved_ips: Option<Vec<String>>,
 }
 
 pub struct FetchPausedRequest {
     pub request_id: String,
     pub url: String,
+    pub method: String,
     pub resource_type: String,
     pub session_id: String,
 }
@@ -100,6 +124,10 @@ pub struct DaemonState {
     pub tracked_requests: Vec<TrackedRequest>,
     pub request_tracking: bool,
     pub active_frame_id: Option<String>,
+    pub init_scripts: Vec<InitScriptEntry>,
+    pub next_init_script_id: u64,
+    pub stealth_preset: Option<StealthPresetState>,
+    pub ssrf_protection: Option<SsrfProtectionState>,
 }
 
 impl DaemonState {
@@ -131,6 +159,10 @@ impl DaemonState {
             tracked_requests: Vec::new(),
             request_tracking: false,
             active_frame_id: None,
+            init_scripts: Vec::new(),
+            next_init_script_id: 0,
+            stealth_preset: None,
+            ssrf_protection: None,
         }
     }
 
@@ -292,6 +324,9 @@ impl DaemonState {
                                         headers,
                                         timestamp,
                                         resource_type,
+                                        blocked_reason: None,
+                                        blocked_by: None,
+                                        resolved_ips: None,
                                     });
                                 }
                             }
@@ -355,6 +390,13 @@ impl DaemonState {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string();
+                            let method = event
+                                .params
+                                .get("request")
+                                .and_then(|r| r.get("method"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("GET")
+                                .to_string();
                             let resource_type = event
                                 .params
                                 .get("resourceType")
@@ -366,6 +408,7 @@ impl DaemonState {
                             fetch_paused.push(FetchPausedRequest {
                                 request_id,
                                 url: request_url,
+                                method,
                                 resource_type,
                                 session_id: sid,
                             });
@@ -384,6 +427,221 @@ impl DaemonState {
 
         (pending_acks, new_targets, destroyed_targets, fetch_paused)
     }
+}
+
+fn current_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn track_blocked_request(
+    state: &mut DaemonState,
+    paused: &FetchPausedRequest,
+    blocked_by: &str,
+    blocked_reason: String,
+    resolved_ips: Option<Vec<String>>,
+) {
+    state.tracked_requests.push(TrackedRequest {
+        url: paused.url.clone(),
+        method: paused.method.clone(),
+        headers: Value::Null,
+        timestamp: current_timestamp_ms(),
+        resource_type: paused.resource_type.clone(),
+        blocked_reason: Some(blocked_reason),
+        blocked_by: Some(blocked_by.to_string()),
+        resolved_ips,
+    });
+}
+
+async fn set_service_worker_bypass(
+    browser: &BrowserManager,
+    session_id: &str,
+    bypass: bool,
+) -> Result<(), String> {
+    let mgr = browser;
+    mgr.client
+        .send_command(
+            "Network.setBypassServiceWorker",
+            Some(json!({ "bypass": bypass })),
+            Some(session_id),
+        )
+        .await?;
+    Ok(())
+}
+
+async fn refresh_fetch_interception(state: &DaemonState) -> Result<(), String> {
+    let Some(mgr) = state.browser.as_ref() else {
+        return Ok(());
+    };
+
+    let session_ids: Vec<String> = mgr.pages_list().into_iter().map(|p| p.session_id).collect();
+
+    let mut patterns: Vec<Value> = state
+        .routes
+        .iter()
+        .map(|r| json!({ "urlPattern": r.url_pattern }))
+        .collect();
+
+    if (state.domain_filter.is_some() || state.ssrf_protection.is_some())
+        && !patterns.iter().any(|p| p["urlPattern"] == "*")
+    {
+        patterns.push(json!({ "urlPattern": "*" }));
+    }
+
+    for session_id in session_ids {
+        if patterns.is_empty() {
+            mgr.client
+                .send_command("Fetch.disable", None, Some(&session_id))
+                .await?;
+        } else {
+            mgr.client
+                .send_command(
+                    "Fetch.enable",
+                    Some(json!({ "patterns": patterns })),
+                    Some(&session_id),
+                )
+                .await?;
+        }
+
+        if state.ssrf_protection.is_some() {
+            set_service_worker_bypass(mgr, &session_id, true).await?;
+        } else {
+            let _ = set_service_worker_bypass(mgr, &session_id, false).await;
+        }
+    }
+
+    Ok(())
+}
+
+async fn apply_all_init_scripts_to_session(
+    state: &mut DaemonState,
+    session_id: &str,
+) -> Result<(), String> {
+    if state.browser.is_none() {
+        return Ok(());
+    }
+
+    let scripts: Vec<(usize, String)> = state
+        .init_scripts
+        .iter()
+        .enumerate()
+        .map(|(idx, script)| (idx, script.source.clone()))
+        .collect();
+
+    for (idx, source) in scripts {
+        let identifier = state
+            .browser
+            .as_ref()
+            .ok_or("Browser not launched")?
+            .add_script_to_evaluate_for_session(session_id, &source)
+            .await?;
+        state.init_scripts[idx]
+            .identifiers_by_session
+            .insert(session_id.to_string(), identifier);
+    }
+    Ok(())
+}
+
+async fn add_init_script_entry(
+    state: &mut DaemonState,
+    logical_id: Option<String>,
+    source: &str,
+) -> Result<String, String> {
+    let pages = state
+        .browser
+        .as_ref()
+        .ok_or("Browser not launched")?
+        .pages_list();
+    let logical_id = logical_id.unwrap_or_else(|| {
+        state.next_init_script_id += 1;
+        format!("init-{}", state.next_init_script_id)
+    });
+
+    let mut entry = InitScriptEntry {
+        logical_id: logical_id.clone(),
+        source: source.to_string(),
+        identifiers_by_session: HashMap::new(),
+    };
+
+    for page in pages {
+        let identifier = state
+            .browser
+            .as_ref()
+            .ok_or("Browser not launched")?
+            .add_script_to_evaluate_for_session(&page.session_id, source)
+            .await?;
+        entry
+            .identifiers_by_session
+            .insert(page.session_id, identifier);
+    }
+
+    state.init_scripts.push(entry);
+    Ok(logical_id)
+}
+
+async fn remove_init_script_entry(
+    state: &mut DaemonState,
+    logical_id: &str,
+) -> Result<bool, String> {
+    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
+    let Some(pos) = state
+        .init_scripts
+        .iter()
+        .position(|s| s.logical_id == logical_id)
+    else {
+        return Ok(false);
+    };
+
+    let entry = state.init_scripts.remove(pos);
+    for (session_id, identifier) in entry.identifiers_by_session {
+        let _ = mgr
+            .remove_script_to_evaluate_for_session(&session_id, &identifier)
+            .await;
+    }
+    Ok(true)
+}
+
+async fn clear_init_script_entries(state: &mut DaemonState) -> Result<usize, String> {
+    let ids: Vec<String> = state
+        .init_scripts
+        .iter()
+        .map(|entry| entry.logical_id.clone())
+        .collect();
+    let count = ids.len();
+    for id in ids {
+        let _ = remove_init_script_entry(state, &id).await?;
+    }
+    Ok(count)
+}
+
+async fn restore_session_capabilities(state: &mut DaemonState) -> Result<(), String> {
+    let Some(browser) = state.browser.as_ref() else {
+        return Ok(());
+    };
+
+    let pages = browser.pages_list();
+
+    if let Some(filter) = state.domain_filter.as_ref() {
+        for page in &pages {
+            network::install_domain_filter(
+                &browser.client,
+                &page.session_id,
+                &filter.allowed_domains,
+            )
+            .await?;
+        }
+        network::sanitize_existing_pages(&browser.client, &pages, filter).await;
+    }
+
+    let session_ids: Vec<String> = pages.into_iter().map(|page| page.session_id).collect();
+    for session_id in session_ids {
+        apply_all_init_scripts_to_session(state, &session_id).await?;
+    }
+
+    refresh_fetch_interception(state).await?;
+    Ok(())
 }
 
 pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
@@ -414,22 +672,26 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
     }
 
     for te in &new_targets {
-        if let Some(ref mut mgr) = state.browser {
-            let attach_result: Result<AttachToTargetResult, String> = mgr
-                .client
-                .send_command_typed(
-                    "Target.attachToTarget",
-                    &AttachToTargetParams {
-                        target_id: te.target_info.target_id.clone(),
-                        flatten: true,
-                    },
-                    None,
-                )
-                .await;
-            if let Ok(attach) = attach_result {
+        let attach_result: Result<AttachToTargetResult, String> =
+            if let Some(mgr) = state.browser.as_ref() {
+                mgr.client
+                    .send_command_typed(
+                        "Target.attachToTarget",
+                        &AttachToTargetParams {
+                            target_id: te.target_info.target_id.clone(),
+                            flatten: true,
+                        },
+                        None,
+                    )
+                    .await
+            } else {
+                continue;
+            };
+
+        if let Ok(attach) = attach_result {
+            if let Some(mgr) = state.browser.as_ref() {
                 let _ = mgr.enable_domains_pub(&attach.session_id).await;
 
-                // Install domain filter on new pages
                 if let Some(ref filter) = state.domain_filter {
                     let _ = network::install_domain_filter(
                         &mgr.client,
@@ -438,23 +700,27 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
                     )
                     .await;
                 }
+            }
 
+            if let Some(mgr) = state.browser.as_mut() {
                 mgr.add_page(super::browser::PageInfo {
                     target_id: te.target_info.target_id.clone(),
-                    session_id: attach.session_id,
+                    session_id: attach.session_id.clone(),
                     url: te.target_info.url.clone(),
                     title: te.target_info.title.clone(),
                     target_type: te.target_info.target_type.clone(),
                 });
             }
+
+            let _ = apply_all_init_scripts_to_session(state, &attach.session_id).await;
+            let _ = refresh_fetch_interception(state).await;
         }
     }
 
     // Handle Fetch.requestPaused events (route interception + domain filter)
     for paused in &fetch_paused {
-        if let Some(ref browser) = state.browser {
-            resolve_fetch_paused(browser, state.domain_filter.as_ref(), &state.routes, paused)
-                .await;
+        if state.browser.is_some() {
+            resolve_fetch_paused(state, paused).await;
         }
     }
 
@@ -657,6 +923,13 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
         "upload" => handle_upload(cmd, state).await,
         "addscript" => handle_addscript(cmd, state).await,
         "addinitscript" => handle_addinitscript(cmd, state).await,
+        "init_script_list" => handle_init_script_list(state).await,
+        "init_script_remove" => handle_init_script_remove(cmd, state).await,
+        "init_script_clear" => handle_init_script_clear(state).await,
+        "stealth_enable" => handle_stealth_enable(cmd, state).await,
+        "stealth_disable" => handle_stealth_disable(state).await,
+        "ssrf_protect_enable" => handle_ssrf_protect_enable(cmd, state).await,
+        "ssrf_protect_disable" => handle_ssrf_protect_disable(state).await,
         "addstyle" => handle_addstyle(cmd, state).await,
         "clipboard" => handle_clipboard(cmd, state).await,
         "wheel" => handle_wheel(cmd, state).await,
@@ -666,6 +939,7 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
         "waitforurl" => handle_waitforurl(cmd, state).await,
         "waitforloadstate" => handle_waitforloadstate(cmd, state).await,
         "waitforfunction" => handle_waitforfunction(cmd, state).await,
+        "wait_challenge_cloudflare" => handle_wait_challenge_cloudflare(cmd, state).await,
         "frame" => handle_frame(cmd, state).await,
         "mainframe" => handle_mainframe(state).await,
         "getbyrole" => handle_getbyrole(cmd, state).await,
@@ -735,6 +1009,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
         state.browser = Some(mgr);
         state.subscribe_to_browser_events();
         try_auto_restore_state(state).await;
+        restore_session_capabilities(state).await?;
         return Ok(());
     }
 
@@ -743,6 +1018,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
         state.browser = Some(mgr);
         state.subscribe_to_browser_events();
         try_auto_restore_state(state).await;
+        restore_session_capabilities(state).await?;
         return Ok(());
     }
 
@@ -750,6 +1026,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
     state.browser = Some(mgr);
     state.subscribe_to_browser_events();
     try_auto_restore_state(state).await;
+    restore_session_capabilities(state).await?;
     Ok(())
 }
 
@@ -889,18 +1166,21 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
     if let Some(url) = cdp_url {
         state.browser = Some(BrowserManager::connect_cdp(url).await?);
         state.subscribe_to_browser_events();
+        restore_session_capabilities(state).await?;
         return Ok(json!({ "launched": true }));
     }
 
     if let Some(port) = cdp_port {
         state.browser = Some(BrowserManager::connect_cdp(&port.to_string()).await?);
         state.subscribe_to_browser_events();
+        restore_session_capabilities(state).await?;
         return Ok(json!({ "launched": true }));
     }
 
     if auto_connect {
         state.browser = Some(BrowserManager::connect_auto().await?);
         state.subscribe_to_browser_events();
+        restore_session_capabilities(state).await?;
         return Ok(json!({ "launched": true }));
     }
 
@@ -918,6 +1198,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
                     Ok(mgr) => {
                         state.browser = Some(mgr);
                         state.subscribe_to_browser_events();
+                        restore_session_capabilities(state).await?;
                         return Ok(json!({ "launched": true, "provider": provider }));
                     }
                     Err(e) => {
@@ -1003,20 +1284,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
 
     state.browser = Some(BrowserManager::launch(options, engine.as_deref()).await?);
     state.subscribe_to_browser_events();
-
-    if let Some(ref filter) = state.domain_filter {
-        if let Some(ref mgr) = state.browser {
-            if let Ok(session_id) = mgr.active_session_id() {
-                let _ = network::install_domain_filter(
-                    &mgr.client,
-                    session_id,
-                    &filter.allowed_domains,
-                )
-                .await;
-                network::sanitize_existing_pages(&mgr.client, &mgr.pages_list(), filter).await;
-            }
-        }
-    }
+    restore_session_capabilities(state).await?;
 
     Ok(json!({ "launched": true }))
 }
@@ -1110,6 +1378,10 @@ async fn handle_navigate(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
 
     if let Some(ref filter) = state.domain_filter {
         filter.check_url(url)?;
+    }
+
+    if state.ssrf_protection.is_some() {
+        network::check_ssrf_safe_url(url).await?;
     }
 
     // WebDriver backend path
@@ -2960,8 +3232,7 @@ async fn handle_addscript(cmd: &Value, state: &DaemonState) -> Result<Value, Str
     Ok(json!({ "added": true }))
 }
 
-async fn handle_addinitscript(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
-    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
+async fn handle_addinitscript(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
     let source = cmd
         .get("script")
         .or_else(|| cmd.get("source"))
@@ -2969,8 +3240,143 @@ async fn handle_addinitscript(cmd: &Value, state: &DaemonState) -> Result<Value,
         .and_then(|v| v.as_str())
         .ok_or("Missing 'script' parameter")?;
 
-    let identifier = mgr.add_script_to_evaluate(source).await?;
-    Ok(json!({ "added": true, "identifier": identifier }))
+    let logical_id = add_init_script_entry(state, None, source).await?;
+    Ok(json!({ "added": true, "identifier": logical_id }))
+}
+
+async fn handle_init_script_list(state: &DaemonState) -> Result<Value, String> {
+    let scripts: Vec<Value> = state
+        .init_scripts
+        .iter()
+        .map(|entry| {
+            json!({
+                "id": entry.logical_id,
+                "source": entry.source,
+                "sessionCount": entry.identifiers_by_session.len(),
+            })
+        })
+        .collect();
+    Ok(json!({ "scripts": scripts }))
+}
+
+async fn handle_init_script_remove(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
+    let logical_id = cmd
+        .get("scriptId")
+        .or_else(|| cmd.get("id"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing 'scriptId' parameter")?;
+    let removed = remove_init_script_entry(state, logical_id).await?;
+    Ok(json!({ "removed": removed, "identifier": logical_id }))
+}
+
+async fn handle_init_script_clear(state: &mut DaemonState) -> Result<Value, String> {
+    let cleared = clear_init_script_entries(state).await?;
+    state.stealth_preset = None;
+    Ok(json!({ "cleared": cleared }))
+}
+
+async fn handle_stealth_enable(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
+    if state.stealth_preset.is_some() {
+        return Ok(json!({ "enabled": true, "preset": "default", "alreadyEnabled": true }));
+    }
+
+    let preset = cmd
+        .get("preset")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+    if preset != "default" {
+        return Err(format!("Unsupported stealth preset '{}'", preset));
+    }
+
+    let script_id = add_init_script_entry(
+        state,
+        Some("preset:stealth:default".to_string()),
+        security::DEFAULT_STEALTH_PRESET,
+    )
+    .await?;
+    state.stealth_preset = Some(StealthPresetState {
+        preset: preset.to_string(),
+        script_id: script_id.clone(),
+    });
+
+    Ok(json!({ "enabled": true, "preset": preset, "identifier": script_id }))
+}
+
+async fn handle_stealth_disable(state: &mut DaemonState) -> Result<Value, String> {
+    let Some(stealth) = state.stealth_preset.take() else {
+        return Ok(json!({ "enabled": false, "alreadyDisabled": true }));
+    };
+
+    let _ = remove_init_script_entry(state, &stealth.script_id).await?;
+    Ok(json!({ "enabled": false, "preset": stealth.preset }))
+}
+
+async fn handle_ssrf_protect_enable(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
+    if state.ssrf_protection.is_some() {
+        return Ok(json!({ "enabled": true, "preset": "strict", "alreadyEnabled": true }));
+    }
+
+    let preset = cmd
+        .get("preset")
+        .and_then(|v| v.as_str())
+        .unwrap_or("strict");
+    if preset != "strict" {
+        return Err(format!("Unsupported ssrf-protect preset '{}'", preset));
+    }
+
+    state.ssrf_protection = Some(SsrfProtectionState {
+        preset: preset.to_string(),
+    });
+
+    refresh_fetch_interception(state).await?;
+
+    Ok(json!({ "enabled": true, "preset": preset }))
+}
+
+async fn handle_ssrf_protect_disable(state: &mut DaemonState) -> Result<Value, String> {
+    let Some(protection) = state.ssrf_protection.take() else {
+        return Ok(json!({ "enabled": false, "alreadyDisabled": true }));
+    };
+
+    refresh_fetch_interception(state).await?;
+
+    Ok(json!({ "enabled": false, "preset": protection.preset }))
+}
+
+async fn handle_wait_challenge_cloudflare(
+    cmd: &Value,
+    state: &DaemonState,
+) -> Result<Value, String> {
+    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
+    let timeout_ms = cmd
+        .get("timeout")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(15_000);
+
+    let detection = mgr
+        .evaluate(security::CLOUDFLARE_DETECT_JS, None)
+        .await
+        .unwrap_or(Value::String("none".to_string()));
+
+    let detected = detection.as_str().unwrap_or("none");
+    match detected {
+        "none" => Ok(json!({ "status": "not_detected" })),
+        "cf_block" => Ok(json!({ "status": "blocked" })),
+        _ => {
+            let session_id = mgr.active_session_id()?.to_string();
+            match wait_for_function(
+                &mgr.client,
+                &session_id,
+                security::CLOUDFLARE_WAIT_JS,
+                timeout_ms,
+            )
+            .await
+            {
+                Ok(()) => Ok(json!({ "status": "resolved" })),
+                Err(_) => Ok(json!({ "status": "timed_out" })),
+            }
+        }
+    }
 }
 
 async fn handle_addstyle(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
@@ -4249,16 +4655,48 @@ async fn handle_har_stop(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
 // Fetch interception resolver (routes + domain filter)
 // ---------------------------------------------------------------------------
 
-async fn resolve_fetch_paused(
-    browser: &BrowserManager,
-    domain_filter: Option<&DomainFilter>,
-    routes: &[RouteEntry],
-    paused: &FetchPausedRequest,
-) {
+async fn resolve_fetch_paused(state: &mut DaemonState, paused: &FetchPausedRequest) {
     let session_id = &paused.session_id;
+    let Some(browser) = state.browser.as_ref() else {
+        return;
+    };
+
+    if state.ssrf_protection.is_some() {
+        match network::check_ssrf_safe_url(&paused.url).await {
+            Err(reason) => {
+                let _ = browser
+                    .client
+                    .send_command(
+                        "Fetch.failRequest",
+                        Some(json!({
+                            "requestId": paused.request_id,
+                            "errorReason": "BlockedByClient"
+                        })),
+                        Some(session_id),
+                    )
+                    .await;
+                track_blocked_request(state, paused, "ssrf-protect", reason, None);
+                return;
+            }
+            Ok(resolved_ips) => {
+                if state.request_tracking {
+                    state.tracked_requests.push(TrackedRequest {
+                        url: paused.url.clone(),
+                        method: paused.method.clone(),
+                        headers: Value::Null,
+                        timestamp: current_timestamp_ms(),
+                        resource_type: paused.resource_type.clone(),
+                        blocked_reason: None,
+                        blocked_by: None,
+                        resolved_ips: Some(resolved_ips),
+                    });
+                }
+            }
+        }
+    }
 
     // Domain filter check (takes priority over routes)
-    if let Some(filter) = domain_filter {
+    if let Some(filter) = state.domain_filter.as_ref() {
         if let Ok(parsed) = url::Url::parse(&paused.url) {
             let scheme = parsed.scheme();
             if scheme != "http" && scheme != "https" {
@@ -4274,6 +4712,13 @@ async fn resolve_fetch_paused(
                             Some(session_id),
                         )
                         .await;
+                    track_blocked_request(
+                        state,
+                        paused,
+                        "domain-filter",
+                        format!("Blocked non-http(s) {} request", scheme),
+                        None,
+                    );
                 } else {
                     let _ = browser
                         .client
@@ -4326,6 +4771,13 @@ async fn resolve_fetch_paused(
                             )
                             .await;
                     }
+                    track_blocked_request(
+                        state,
+                        paused,
+                        "domain-filter",
+                        format!("Domain '{}' is not in the allowed domains list", hostname),
+                        None,
+                    );
                     return;
                 }
             }
@@ -4333,7 +4785,7 @@ async fn resolve_fetch_paused(
     }
 
     // Route matching
-    for route in routes {
+    for route in &state.routes {
         let matches = if route.url_pattern == "*" {
             true
         } else if route.url_pattern.contains('*') {
@@ -4360,6 +4812,13 @@ async fn resolve_fetch_paused(
                         Some(session_id),
                     )
                     .await;
+                track_blocked_request(
+                    state,
+                    paused,
+                    "route",
+                    format!("Blocked by route '{}'", route.url_pattern),
+                    None,
+                );
                 return;
             }
 
@@ -4414,8 +4873,7 @@ async fn resolve_fetch_paused(
 // ---------------------------------------------------------------------------
 
 async fn handle_route(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
-    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
-    let session_id = mgr.active_session_id()?.to_string();
+    let _mgr = state.browser.as_ref().ok_or("Browser not launched")?;
     let url_pattern = cmd
         .get("url")
         .and_then(|v| v.as_str())
@@ -4450,32 +4908,13 @@ async fn handle_route(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
         abort,
     });
 
-    // Re-enable Fetch with all route patterns combined.
-    // When domain filtering is active, include a wildcard so all requests
-    // continue to be intercepted for domain checks.
-    let mut patterns: Vec<Value> = state
-        .routes
-        .iter()
-        .map(|r| json!({ "urlPattern": r.url_pattern }))
-        .collect();
-    if state.domain_filter.is_some() && !patterns.iter().any(|p| p["urlPattern"] == "*") {
-        patterns.push(json!({ "urlPattern": "*" }));
-    }
-
-    mgr.client
-        .send_command(
-            "Fetch.enable",
-            Some(json!({ "patterns": patterns })),
-            Some(&session_id),
-        )
-        .await?;
+    refresh_fetch_interception(state).await?;
 
     Ok(json!({ "routed": url_pattern }))
 }
 
 async fn handle_unroute(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
-    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
-    let session_id = mgr.active_session_id()?.to_string();
+    let _mgr = state.browser.as_ref().ok_or("Browser not launched")?;
 
     let url = cmd.get("url").and_then(|v| v.as_str());
 
@@ -4488,35 +4927,7 @@ async fn handle_unroute(cmd: &Value, state: &mut DaemonState) -> Result<Value, S
         }
     }
 
-    if state.routes.is_empty() {
-        if state.domain_filter.is_some() {
-            // Domain filtering still needs Fetch interception; reset to wildcard
-            mgr.client
-                .send_command(
-                    "Fetch.enable",
-                    Some(json!({ "patterns": [{ "urlPattern": "*" }] })),
-                    Some(&session_id),
-                )
-                .await?;
-        } else {
-            mgr.client
-                .send_command("Fetch.disable", None, Some(&session_id))
-                .await?;
-        }
-    } else {
-        let patterns: Vec<Value> = state
-            .routes
-            .iter()
-            .map(|r| json!({ "urlPattern": r.url_pattern }))
-            .collect();
-        mgr.client
-            .send_command(
-                "Fetch.enable",
-                Some(json!({ "patterns": patterns })),
-                Some(&session_id),
-            )
-            .await?;
-    }
+    refresh_fetch_interception(state).await?;
 
     let label = url.unwrap_or("all");
     Ok(json!({ "unrouted": label }))

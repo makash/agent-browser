@@ -10,6 +10,8 @@ agent-browser includes an experimental native Rust daemon that communicates with
 
 Native mode is opt-in. Enable it with the `--native` flag or the `AGENT_BROWSER_NATIVE` environment variable.
 
+Standalone release binaries also fall back to the native daemon automatically when the packaged Node.js runtime files are not available.
+
 ### CLI Flag
 
 ```bash
@@ -67,12 +69,32 @@ All core commands are supported in native mode:
 - Recording: `record start/stop`
 - Profiling: `profiler start/stop`, `trace start/stop`
 
+## Native Security Features
+
+The native daemon now includes session-scoped security and stealth primitives that are useful for scanners and long-lived automation flows:
+
+- `init-script add|list|remove|clear` for pre-navigation JavaScript injection via CDP `Page.addScriptToEvaluateOnNewDocument`
+- `stealth enable|disable` for the built-in anti-fingerprinting preset
+- `ssrf-protect enable|disable` for strict blocking of private and special-use network destinations before dispatch
+- `wait challenge cloudflare --timeout <ms>` for atomic challenge detection and wait
+
+Example:
+
+```bash
+agent-browser --native stealth enable
+agent-browser --native ssrf-protect enable
+agent-browser --native open https://example.com
+agent-browser --native wait challenge cloudflare --timeout 15000
+agent-browser --native snapshot
+```
+
 ## Known Limitations
 
 - **Firefox and WebKit** are not yet supported (Chromium and Safari only)
 - **Playwright trace format** is not available (native tracing uses Chrome's built-in tracing)
 - **HAR export** is not available
 - **Network route interception** uses CDP Fetch domain instead of Playwright's route API
+- **Default Node.js mode does not yet expose the new security preset commands**; use native mode for `init-script`, `stealth`, `ssrf-protect`, and Cloudflare challenge wait
 
 ## Switching Between Modes
 

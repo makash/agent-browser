@@ -544,6 +544,9 @@ async fn test_tracked_request_struct() {
         headers: json!({"Accept": "text/html"}),
         timestamp: 12345,
         resource_type: "Document".to_string(),
+        blocked_reason: None,
+        blocked_by: None,
+        resolved_ips: None,
     };
     let serialized = serde_json::to_value(&tr).unwrap();
     assert_eq!(serialized["url"], "https://example.com/api");
@@ -564,6 +567,9 @@ async fn test_request_tracking_state() {
         headers: json!({}),
         timestamp: 1,
         resource_type: "Document".to_string(),
+        blocked_reason: None,
+        blocked_by: None,
+        resolved_ips: None,
     });
     state.tracked_requests.push(super::actions::TrackedRequest {
         url: "https://other.com".to_string(),
@@ -571,6 +577,9 @@ async fn test_request_tracking_state() {
         headers: json!({}),
         timestamp: 2,
         resource_type: "XHR".to_string(),
+        blocked_reason: None,
+        blocked_by: None,
+        resolved_ips: None,
     });
     assert_eq!(state.tracked_requests.len(), 2);
 

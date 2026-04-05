@@ -2370,6 +2370,13 @@ Network:  agent-browser network <action>
   unroute [url]
   requests [--clear] [--filter <pattern>]
 
+Native Security:  agent-browser --native <command>
+  init-script add --js <script>
+  init-script list|remove <id>|clear
+  stealth enable|disable
+  ssrf-protect enable|disable
+  wait challenge cloudflare [--timeout <ms>]
+
 Storage:
   cookies [get|set|clear]    Manage cookies (set supports --url, --domain, --path, --httpOnly, --secure, --sameSite, --expires)
   storage <local|session>    Manage web storage
@@ -2512,6 +2519,9 @@ Environment:
 Install (recommended, fastest - native Rust CLI):
   npm install -g agent-browser
   agent-browser install                  # Download Chromium (first time)
+
+Standalone release binaries:
+  If the packaged Node.js daemon is not present, agent-browser falls back to the native Rust daemon automatically.
 
 Try without installing (slower, routes through Node.js):
   npx agent-browser open example.com
